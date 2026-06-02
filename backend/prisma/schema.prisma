@@ -1,0 +1,107 @@
+// This is your Prisma schema file
+// Learn more: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum Role {
+  ADMIN
+  ORGANIZER
+  PLAYER
+}
+
+enum SportType {
+  BEACH_VOLLEYBALL
+  FOOTBALL_6V6
+  BASKETBALL
+  TENNIS
+  OTHER
+}
+
+enum TournamentStatus {
+  DRAFT
+  OPEN
+  IN_PROGRESS
+  FINISHED
+  CANCELLED
+}
+
+enum MatchStatus {
+  SCHEDULED
+  IN_PROGRESS
+  FINISHED
+}
+
+// ─── Models ──────────────────────────────────────────────────────────────────
+
+model User {
+  id                   String                  @id @default(uuid())
+  name                 String
+  email                String                  @unique
+  password             String
+  role                 Role                    @default(PLAYER)
+  organizedTournaments Tournament[]            @relation("OrganizedTournaments")
+  participations       TournamentParticipant[]
+  matchesAsPlayer1     Match[]                 @relation("Player1Matches")
+  matchesAsPlayer2     Match[]                 @relation("Player2Matches")
+  createdAt            DateTime                @default(now())
+  updatedAt            DateTime                @updatedAt
+
+  @@map("users")
+}
+
+model Tournament {
+  id              String                  @id @default(uuid())
+  title           String
+  description     String?
+  date            DateTime
+  sportType       SportType
+  maxParticipants Int
+  status          TournamentStatus        @default(DRAFT)
+  organizerId     String
+  organizer       User                    @relation("OrganizedTournaments", fields: [organizerId], references: [id])
+  participants    TournamentParticipant[]
+  matches         Match[]
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+
+  @@map("tournaments")
+}
+
+model TournamentParticipant {
+  id           String     @id @default(uuid())
+  tournamentId String
+  userId       String
+  tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  joinedAt     DateTime   @default(now())
+
+  @@unique([tournamentId, userId])
+  @@map("tournament_participants")
+}
+
+model Match {
+  id           String      @id @default(uuid())
+  tournamentId String
+  player1Id    String
+  player2Id    String
+  score1       Int?
+  score2       Int?
+  round        Int         @default(1)
+  status       MatchStatus @default(SCHEDULED)
+  tournament   Tournament  @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  player1      User        @relation("Player1Matches", fields: [player1Id], references: [id])
+  player2      User        @relation("Player2Matches", fields: [player2Id], references: [id])
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@map("matches")
+}
