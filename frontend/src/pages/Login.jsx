@@ -22,7 +22,12 @@ export default function Login() {
     setLoading(true);
     try {
       await login(form.email, form.password);
-      navigate(from, { replace: true });
+      navigate(from, {
+        replace: true,
+        state: location.state?.autoJoinTournamentId
+          ? { autoJoinTournamentId: location.state.autoJoinTournamentId }
+          : undefined,
+      });
     } catch (err) {
       setError(err.response?.data?.message || 'Błąd logowania. Spróbuj ponownie.');
     } finally {
@@ -31,13 +36,13 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-[calc(100vh-4rem)] bg-slate-950 flex items-center justify-center px-4">
+    <div className="auth-page min-h-[calc(100vh-4rem)] bg-slate-950 flex items-center justify-center px-4">
       <div className="w-full max-w-md">
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8">
           <h1 className="text-2xl font-bold text-white mb-1">Zaloguj się</h1>
           <p className="text-slate-400 text-sm mb-6">
             Nie masz konta?{' '}
-            <Link to="/register" className="text-indigo-400 hover:text-indigo-300">
+            <Link to="/register" state={location.state} className="text-indigo-400 hover:text-indigo-300">
               Zarejestruj się
             </Link>
           </p>

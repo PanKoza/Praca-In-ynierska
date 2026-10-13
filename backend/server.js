@@ -10,10 +10,28 @@ const { errorHandler } = require('./src/middleware/error.middleware');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'http://localhost:5175',
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:5174',
+  'http://127.0.0.1:5175',
+];
+
 // ─── Global Middleware ────────────────────────────────────────────────────────
 
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:5173',
+  origin: (origin, callback) => {
+    const isAllowed = !origin || allowedOrigins.includes(origin) || /^http:\/\/localhost:\d+$/.test(origin) || /^http:\/\/127\.0\.0\.1:\d+$/.test(origin);
+
+    if (isAllowed) {
+      callback(null, origin || true);
+      return;
+    }
+
+    callback(new Error('Not allowed by CORS'));
+  },
   credentials: true,
 }));
 app.use(express.json());

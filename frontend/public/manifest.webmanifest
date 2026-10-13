@@ -1,0 +1,17 @@
+{
+  "name": "TourniDesk Live Score",
+  "short_name": "TourniDesk",
+  "description": "Panel sędziowski i wyniki na żywo.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#090D16",
+  "theme_color": "#090D16",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

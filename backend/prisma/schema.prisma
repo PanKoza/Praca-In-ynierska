@@ -16,19 +16,25 @@ enum Role {
   ADMIN
   ORGANIZER
   PLAYER
+  REFEREE
 }
 
 enum SportType {
   BEACH_VOLLEYBALL
   FOOTBALL_6V6
+  SOCCER
   BASKETBALL
+  VOLLEYBALL
   TENNIS
+  ESPORTS
+  CUSTOM
   OTHER
 }
 
 enum TournamentStatus {
   DRAFT
   OPEN
+  PUBLISHED
   IN_PROGRESS
   FINISHED
   CANCELLED
@@ -45,6 +51,7 @@ enum MatchStatus {
 model User {
   id                   String                  @id @default(uuid())
   name                 String
+  username             String                  @unique
   email                String                  @unique
   password             String
   role                 Role                    @default(PLAYER)
@@ -52,6 +59,7 @@ model User {
   participations       TournamentParticipant[]
   matchesAsPlayer1     Match[]                 @relation("Player1Matches")
   matchesAsPlayer2     Match[]                 @relation("Player2Matches")
+  assignedMatches      Match[]                 @relation("AssignedRefereeMatches")
   createdAt            DateTime                @default(now())
   updatedAt            DateTime                @updatedAt
 
@@ -59,19 +67,32 @@ model User {
 }
 
 model Tournament {
-  id              String                  @id @default(uuid())
-  title           String
-  description     String?
-  date            DateTime
-  sportType       SportType
-  maxParticipants Int
-  status          TournamentStatus        @default(DRAFT)
-  organizerId     String
-  organizer       User                    @relation("OrganizedTournaments", fields: [organizerId], references: [id])
-  participants    TournamentParticipant[]
-  matches         Match[]
-  createdAt       DateTime                @default(now())
-  updatedAt       DateTime                @updatedAt
+  id                   String                  @id @default(uuid())
+  title                String
+  description          String?
+  date                 DateTime
+  sportType            SportType
+  maxParticipants      Int
+  status               TournamentStatus        @default(DRAFT)
+  endDate              DateTime?
+  registrationDeadline DateTime?
+  location             String?
+  format               String?
+  seeding              String?
+  registrationType     String?
+  minTeamSize          Int?
+  maxTeamSize          Int?
+  entryFee             Decimal?                @db.Decimal(10, 2)
+  currency             String?
+  autoApprove          Boolean                 @default(false)
+  wizardStep           Int                     @default(1)
+  wizardData           Json?
+  organizerId          String
+  organizer            User                    @relation("OrganizedTournaments", fields: [organizerId], references: [id])
+  participants         TournamentParticipant[]
+  matches              Match[]
+  createdAt            DateTime                @default(now())
+  updatedAt            DateTime                @updatedAt
 
   @@map("tournaments")
 }
@@ -89,19 +110,63 @@ model TournamentParticipant {
 }
 
 model Match {
-  id           String      @id @default(uuid())
-  tournamentId String
-  player1Id    String
-  player2Id    String
-  score1       Int?
-  score2       Int?
-  round        Int         @default(1)
-  status       MatchStatus @default(SCHEDULED)
-  tournament   Tournament  @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
-  player1      User        @relation("Player1Matches", fields: [player1Id], references: [id])
-  player2      User        @relation("Player2Matches", fields: [player2Id], references: [id])
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  id                    String       @id @default(uuid())
+  tournamentId          String
+  player1Id             String?
+  player2Id             String?
+  score1                Int?
+  score2                Int?
+  extraTimeScore1       Int?
+  extraTimeScore2       Int?
+  penaltyScore1         Int?
+  penaltyScore2         Int?
+  winnerId           String?
+  round                 Int          @default(1)
+  groupKey              String?
+  nextMatchId           String?
+  nextSlot              Int?
+  nextMatch             Match?       @relation("MatchBracket", fields: [nextMatchId], references: [id], onDelete: SetNull)
+  previousMatches       Match[]      @relation("MatchBracket")
+  loserNextMatchId      String?
+  loserNextSlot         Int?
+  loserNextMatch        Match?       @relation("LoserBracket", fields: [loserNextMatchId], references: [id], onDelete: SetNull)
+  previousLosers        Match[]      @relation("LoserBracket")
+  status                MatchStatus  @default(SCHEDULED)
+  period                String?
+  clockSeconds          Int          @default(0)
+  clockRunning          Boolean      @default(false)
+  clockStartedAt        DateTime?
+  court                 String?
+  scheduledAt           DateTime?
+  revision              Int          @default(0)
+  refereeTokenHash      String?      @unique
+  refereeTokenExpiresAt DateTime?
+  assignedRefereeId     String?
+  tournament            Tournament   @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  player1               User?        @relation("Player1Matches", fields: [player1Id], references: [id])
+  player2               User?        @relation("Player2Matches", fields: [player2Id], references: [id])
+  assignedReferee       User?        @relation("AssignedRefereeMatches", fields: [assignedRefereeId], references: [id], onDelete: SetNull)
+  events                MatchEvent[]
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
 
+  @@index([tournamentId, groupKey, status])
+  @@index([assignedRefereeId])
   @@map("matches")
+}
+
+model MatchEvent {
+  id        String   @id @default(uuid())
+  commandId String   @unique
+  matchId   String
+  sequence  Int
+  type      String
+  payload   Json
+  actorId   String?
+  createdAt DateTime @default(now())
+  match     Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+
+  @@unique([matchId, sequence])
+  @@index([matchId, createdAt])
+  @@map("match_events")
 }

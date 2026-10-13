@@ -23,19 +23,29 @@ function signToken(payload) {
 
 /**
  * POST /api/auth/register
- * Body: { name, email, password, role? }
+ * Body: { name, username, email, password, role? }
  */
 async function register(req, res, next) {
   try {
-    const { name, email, password, role } = req.body;
+    const { name, username, email, password, role } = req.body;
 
-    if (!name || !email || !password) {
-      return res.status(400).json({ message: 'Name, email and password are required.' });
+    if (!name || !username || !email || !password) {
+      return res.status(400).json({ message: 'Name, username, email and password are required.' });
+    }
+    const normalizedUsername = String(username).trim().toLowerCase();
+    if (!/^[a-z0-9_]{3,24}$/.test(normalizedUsername)) {
+      return res.status(400).json({ message: 'Username must be 3–24 characters and contain only letters, numbers or underscores.' });
     }
 
-    const existingUser = await prisma.user.findUnique({ where: { email } });
-    if (existingUser) {
+    const existingUser = await prisma.user.findFirst({
+      where: { OR: [{ email }, { username: normalizedUsername }] },
+      select: { email: true, username: true },
+    });
+    if (existingUser?.email === email) {
       return res.status(409).json({ message: 'A user with this email already exists.' });
+    }
+    if (existingUser?.username === normalizedUsername) {
+      return res.status(409).json({ message: 'This username is already taken.' });
     }
 
     const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
@@ -43,18 +53,21 @@ async function register(req, res, next) {
     const user = await prisma.user.create({
       data: {
         name,
+        username: normalizedUsername,
         email,
         password: hashedPassword,
-        // Only allow PLAYER or ORGANIZER on self-register; ADMIN must be set manually
-        role: role === 'ORGANIZER' ? 'ORGANIZER' : 'PLAYER',
+        role: ['ORGANIZER', 'REFEREE'].includes(role) ? role : 'PLAYER',
       },
-      select: { id: true, name: true, email: true, role: true, createdAt: true },
+      select: { id: true, name: true, username: true, email: true, role: true, createdAt: true },
     });
 
     const token = signToken({ id: user.id, role: user.role });
 
     return res.status(201).json({ token, user });
   } catch (error) {
+    if (error.code === 'P2002') {
+      return res.status(409).json({ message: 'Email or username is already in use.' });
+    }
     next(error);
   }
 }
@@ -99,7 +112,7 @@ async function getMe(req, res, next) {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
-      select: { id: true, name: true, email: true, role: true, createdAt: true },
+      select: { id: true, name: true, username: true, email: true, role: true, createdAt: true },
     });
 
     if (!user) {

@@ -1,5 +1,16 @@
 const jwt = require('jsonwebtoken');
 
+function optionalProtect(req, _res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return next();
+  try {
+    req.user = jwt.verify(authHeader.slice(7), process.env.JWT_SECRET);
+  } catch {
+    req.user = null;
+  }
+  return next();
+}
+
 /**
  * Middleware: Verifies the JWT from the Authorization header.
  * On success, attaches the decoded payload to req.user.
@@ -38,4 +49,4 @@ function authorize(...roles) {
   };
 }
 
-module.exports = { protect, authorize };
+module.exports = { protect, optionalProtect, authorize };
