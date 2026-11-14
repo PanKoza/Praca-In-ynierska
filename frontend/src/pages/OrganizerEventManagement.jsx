@@ -1,32 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
+import { FORMAT_LABELS, MATCH_STATUS, SPORTS, TOURNAMENT_STATUS_LABELS, capacity, formatDateTime, plural, sportLabel } from '../lib/labels';
+import Icon from '../components/Icon';
+import { Modal, useConfirm } from '../components/Modal';
+import Reveal from '../components/Reveal';
+import { useTour } from '../components/Tour';
+import { Arrow, Avatar, BackLink, FullPageLoader, Notice, SectionHeading, StatTile, StatusChip, TabPanel, Tabs, Title } from '../components/ui';
 
-const TABS = [
-  { id: 'overview', label: 'Przegląd', icon: '◈' },
-  { id: 'participants', label: 'Uczestnicy', icon: '◎' },
-  { id: 'matches', label: 'Mecze i sędziowie', icon: '◉' },
-  { id: 'settings', label: 'Ustawienia', icon: '⚙' },
-];
+const TAB_IDS = ['overview', 'participants', 'matches', 'settings'];
 
-const STATUS_LABELS = {
-  DRAFT: 'Wersja robocza',
-  OPEN: 'Zapisy otwarte',
-  PUBLISHED: 'Opublikowany',
-  IN_PROGRESS: 'W trakcie',
-  FINISHED: 'Zakończony',
-  CANCELLED: 'Anulowany',
-};
-
-const STATUS_STYLES = {
-  DRAFT: 'bg-white/10 text-slate-300',
-  OPEN: 'bg-cyan-300/10 text-cyan-200',
-  PUBLISHED: 'bg-blue-300/10 text-blue-200',
-  IN_PROGRESS: 'bg-emerald-300/10 text-emerald-200',
-  FINISHED: 'bg-violet-300/10 text-violet-200',
-  CANCELLED: 'bg-rose-300/10 text-rose-200',
-};
+const STATUS_LABELS = TOURNAMENT_STATUS_LABELS;
 
 const STATUS_TRANSITIONS = {
   DRAFT: ['DRAFT'],
@@ -36,23 +21,11 @@ const STATUS_TRANSITIONS = {
   FINISHED: ['FINISHED'],
   CANCELLED: ['CANCELLED'],
 };
-const FORMAT_LABELS = {
-  SINGLE_ELIMINATION: 'Pojedyncza eliminacja',
-  DOUBLE_ELIMINATION: 'Podwójna eliminacja',
-  ROUND_ROBIN: 'Każdy z każdym',
-  GROUP_STAGE: 'Grupy i play-offy',
-};
 
-const SPORTS = [
-  ['BEACH_VOLLEYBALL', 'Siatkówka plażowa'],
-  ['FOOTBALL_6V6', 'Piłka nożna 6v6'],
-  ['SOCCER', 'Piłka nożna'],
-  ['BASKETBALL', 'Koszykówka'],
-  ['VOLLEYBALL', 'Siatkówka'],
-  ['TENNIS', 'Tenis'],
-  ['ESPORTS', 'E-sport'],
-  ['CUSTOM', 'Własna dyscyplina'],
-  ['OTHER', 'Inne'],
+const TOUR = [
+  { target: '[data-tour="event-plan"]', title: 'Plan wydarzenia', body: 'Cztery etapy od zgłoszeń do wyników. Podświetlony etap to Twój następny krok — przycisk obok prowadzi prosto do niego.' },
+  { target: '[data-tour="event-tabs"]', title: 'Wszystko w czterech zakładkach', body: 'Uczestnicy, mecze i sędziowie oraz ustawienia. Zakładka „Mecze i sędziowie” to miejsce, gdzie spędzisz najwięcej czasu.' },
+  { target: '[data-tour="event-actions"]', title: 'Szybkie akcje', body: 'Podgląd strony, którą widzą uczestnicy, oraz szybka zmiana terminu i lokalizacji.' },
 ];
 
 function toDateInput(value) {
@@ -63,30 +36,31 @@ function toDateInput(value) {
 }
 
 function dateLabel(value) {
-  if (!value) return 'Nie ustalono';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? 'Nie ustalono' : date.toLocaleString('pl-PL', {
-    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit',
-  });
-}
-
-function SummaryCard({ label, value, sublabel, accent }) {
-  return (
-    <div className={`rounded-2xl border border-white/[0.07] bg-gradient-to-br ${accent} p-4`}>
-      <p className="text-xs font-medium text-slate-400">{label}</p>
-      <p className="mt-2 text-3xl font-black tracking-tight text-white">{value}</p>
-      <p className="mt-1 text-[11px] text-slate-500">{sublabel}</p>
-    </div>
-  );
+  return formatDateTime(value, { weekday: 'long', month: 'long' }, 'Nie ustalono');
 }
 
 function Field({ label, children, hint }) {
   return (
     <label className="block">
-      <span className="mb-2 block text-xs font-semibold text-slate-300">{label}</span>
+      <span className="label">{label}</span>
       {children}
-      {hint && <span className="mt-1.5 block text-[11px] text-slate-500">{hint}</span>}
+      {hint && <span className="hint">{hint}</span>}
     </label>
+  );
+}
+
+/* Collapsible block inside a match card: the summary line shows the current state at a glance. */
+function Fold({ icon, title, summary, tone, children, defaultOpen = false }) {
+  return (
+    <details className="group border-t border-line" open={defaultOpen || undefined}>
+      <summary className="flex min-h-[52px] cursor-pointer list-none items-center gap-3 px-4 py-2.5 transition hover:bg-ink/[0.03] sm:px-5 [&::-webkit-details-marker]:hidden">
+        <Icon name={icon} size={18} className="shrink-0 text-muted" />
+        <span className="shrink-0 text-sm font-semibold text-ink">{title}</span>
+        <span className={`min-w-0 flex-1 truncate text-right text-sm ${tone === 'warn' ? 'font-semibold text-warn' : 'text-muted'}`}>{summary}</span>
+        <Icon name="chevron-down" size={17} className="shrink-0 text-muted transition-transform duration-300 group-open:rotate-180" />
+      </summary>
+      <div className="px-4 pb-5 pt-1 sm:px-5">{children}</div>
+    </details>
   );
 }
 
@@ -120,88 +94,86 @@ function MatchResultControls({ match, format, onSave, saving }) {
   }
 
   return (
-    <form onSubmit={(event) => submitScore(event, 'IN_PROGRESS')} className="mt-4 rounded-xl border border-white/[0.06] bg-black/20 p-3">
-      <p className="mb-3 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Wynik meczu</p>
+    <form onSubmit={(event) => submitScore(event, 'IN_PROGRESS')}>
       <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-end gap-3">
         {[1, 2].map((side) => (
           <div key={side} className={side === 2 ? 'col-start-3 row-start-1' : 'col-start-1 row-start-1'}>
             <Field label={match[`player${side}`]?.name || `Uczestnik ${side}`}>
-            <input
-              aria-label={`Wynik ${match[`player${side}`]?.name || `uczestnika ${side}`}`}
-              type="number"
-              min="0"
-              max="999"
-              step="1"
-              required
-              disabled={finished || saving}
-              value={scores[`score${side}`]}
-              onChange={(event) => changeScore(`score${side}`, event.target.value)}
-              className={`${INPUT_CLASS} text-center text-lg font-bold`}
-            />
+              <input
+                aria-label={`Wynik ${match[`player${side}`]?.name || `uczestnika ${side}`}`}
+                type="number"
+                min="0"
+                max="999"
+                step="1"
+                required
+                disabled={finished || saving}
+                value={scores[`score${side}`]}
+                onChange={(event) => changeScore(`score${side}`, event.target.value)}
+                className="input !min-h-[60px] text-center font-display !text-3xl font-extrabold"
+              />
             </Field>
           </div>
         ))}
-        <span className="col-start-2 row-start-1 pb-3 text-slate-500">:</span>
+        <span className="num col-start-2 row-start-1 pb-4 text-3xl text-muted">:</span>
       </div>
       {needsTiebreak && (
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
-          <div>
-            <p className="mb-2 text-xs font-semibold text-slate-300">Dogrywka — dodatkowe punkty</p>
+          <fieldset>
+            <legend className="label">Dogrywka — dodatkowe punkty</legend>
             <div className="grid grid-cols-2 gap-3">
               {[1, 2].map((side) => (
-                <Field key={side} label={match[`player${side}`]?.name || `Uczestnik ${side}`}>
-                  <input
-                    type="number"
-                    min="0"
-                    max="999"
-                    step="1"
-                    disabled={finished || saving}
-                    value={scores[`extraTimeScore${side}`]}
-                    onChange={(event) => changeScore(`extraTimeScore${side}`, event.target.value)}
-                    className={`${INPUT_CLASS} text-center`}
-                  />
-                </Field>
+                <input
+                  key={side}
+                  aria-label={`Dogrywka — ${match[`player${side}`]?.name || `uczestnik ${side}`}`}
+                  type="number"
+                  min="0"
+                  max="999"
+                  step="1"
+                  disabled={finished || saving}
+                  value={scores[`extraTimeScore${side}`]}
+                  onChange={(event) => changeScore(`extraTimeScore${side}`, event.target.value)}
+                  className="input input-sm text-center"
+                />
               ))}
             </div>
-          </div>
-          <div>
-            <p className="mb-2 text-xs font-semibold text-slate-300">Rzuty karne — wynik serii</p>
+          </fieldset>
+          <fieldset>
+            <legend className="label">Rzuty karne — wynik serii</legend>
             <div className="grid grid-cols-2 gap-3">
               {[1, 2].map((side) => (
-                <Field key={side} label={match[`player${side}`]?.name || `Uczestnik ${side}`}>
-                  <input
-                    type="number"
-                    min="0"
-                    max="999"
-                    step="1"
-                    disabled={finished || saving}
-                    value={scores[`penaltyScore${side}`]}
-                    onChange={(event) => changeScore(`penaltyScore${side}`, event.target.value)}
-                    className={`${INPUT_CLASS} text-center`}
-                  />
-                </Field>
+                <input
+                  key={side}
+                  aria-label={`Rzuty karne — ${match[`player${side}`]?.name || `uczestnik ${side}`}`}
+                  type="number"
+                  min="0"
+                  max="999"
+                  step="1"
+                  disabled={finished || saving}
+                  value={scores[`penaltyScore${side}`]}
+                  onChange={(event) => changeScore(`penaltyScore${side}`, event.target.value)}
+                  className="input input-sm text-center"
+                />
               ))}
             </div>
-          </div>
+          </fieldset>
         </div>
       )}
       {!finished && (
         <div className="mt-4 flex flex-wrap justify-end gap-2">
-          <button type="submit" disabled={saving} className="rounded-lg border border-[#0F62FE]/30 bg-[#0F62FE]/10 px-4 py-2.5 text-xs font-bold text-blue-100 transition hover:bg-[#0F62FE]/20 disabled:opacity-50">
+          <button type="submit" disabled={saving} className="btn btn-ghost btn-sm">
             {saving ? 'Zapisywanie…' : match.status === 'SCHEDULED' ? 'Zapisz wynik i rozpocznij' : 'Zapisz wynik na żywo'}
           </button>
-          <button type="button" disabled={saving} onClick={(event) => submitScore(event, 'FINISHED')} className="rounded-lg bg-emerald-400/15 px-4 py-2.5 text-xs font-bold text-emerald-100 transition hover:bg-emerald-400/25 disabled:opacity-50">
-            Zakończ i zatwierdź
+          <button type="button" disabled={saving} onClick={(event) => submitScore(event, 'FINISHED')} className="btn btn-solid btn-sm">
+            <Icon name="check" size={16} /> Zakończ i zatwierdź
           </button>
         </div>
       )}
-      {finished && <p className="mt-3 text-xs text-slate-500">Wynik zatwierdzony i zablokowany przed przypadkową zmianą.</p>}
+      {finished && <p className="hint">Wynik zatwierdzony i zablokowany przed przypadkową zmianą.</p>}
     </form>
   );
 }
 
 function MatchDetailsEditor({ match, participants, onSave, saving }) {
-  const [editing, setEditing] = useState(false);
   const [details, setDetails] = useState(() => ({
     player1Id: match.player1Id || '',
     player2Id: match.player2Id || '',
@@ -221,7 +193,7 @@ function MatchDetailsEditor({ match, participants, onSave, saving }) {
       court: details.court.trim() || null,
       scheduledAt: details.scheduledAt ? new Date(details.scheduledAt).toISOString() : null,
     };
-    const saved = await onSave(match, match.status === 'SCHEDULED'
+    await onSave(match, match.status === 'SCHEDULED'
       ? {
         ...scheduleDetails,
         player1Id: details.player1Id || null,
@@ -230,89 +202,65 @@ function MatchDetailsEditor({ match, participants, onSave, saving }) {
         groupKey: details.groupKey.trim() || null,
       }
       : scheduleDetails);
-    if (saved) setEditing(false);
   }
 
   return (
-    <div className="mt-4 rounded-xl border border-white/[0.06] bg-black/15 p-3">
-      <dl className="grid gap-3 text-xs sm:grid-cols-2">
-        <div>
-          <dt className="text-slate-500">Godzina rozpoczęcia</dt>
-          <dd className="mt-1 font-semibold text-slate-200">{match.scheduledAt ? dateLabel(match.scheduledAt) : 'Nie ustalono'}</dd>
-        </div>
-        <div>
-          <dt className="text-slate-500">Lokalizacja / boisko</dt>
-          <dd className="mt-1 font-semibold text-slate-200">{match.court || 'Nie ustalono'}</dd>
-        </div>
-      </dl>
-      {!editing ? (
-        <button
-          type="button"
-          onClick={() => setEditing(true)}
-          className="mt-3 rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-300 transition hover:border-[#0F62FE]/30 hover:bg-white/[0.04] hover:text-white"
-        >
-          Edytuj szczegóły meczu
+    <form onSubmit={submit}>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {match.status === 'SCHEDULED' && (
+          <>
+            <Field label="Uczestnik A">
+              <select value={details.player1Id} onChange={(event) => update('player1Id', event.target.value)} className="input input-sm">
+                <option value="">Wybierz uczestnika</option>
+                {participants.filter(({ user: participant }) => participant.id !== details.player2Id).map(({ user: participant }) => (
+                  <option key={participant.id} value={participant.id}>{participant.name}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Uczestnik B">
+              <select value={details.player2Id} onChange={(event) => update('player2Id', event.target.value)} className="input input-sm">
+                <option value="">Wybierz uczestnika</option>
+                {participants.filter(({ user: participant }) => participant.id !== details.player1Id).map(({ user: participant }) => (
+                  <option key={participant.id} value={participant.id}>{participant.name}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Runda">
+              <input required type="number" min="1" max="64" step="1" value={details.round} onChange={(event) => update('round', event.target.value)} className="input input-sm" />
+            </Field>
+          </>
+        )}
+        <Field label="Boisko / stół">
+          <input maxLength="80" value={details.court} onChange={(event) => update('court', event.target.value)} placeholder="np. Boisko A" className="input input-sm" />
+        </Field>
+        <Field label="Termin meczu">
+          <input type="datetime-local" value={details.scheduledAt} onChange={(event) => update('scheduledAt', event.target.value)} className="input input-sm" />
+        </Field>
+        {match.status === 'SCHEDULED' && (
+          <Field label="Grupa">
+            <input maxLength="80" value={details.groupKey} onChange={(event) => update('groupKey', event.target.value)} placeholder="np. Grupa A" className="input input-sm" />
+          </Field>
+        )}
+      </div>
+      <div className="mt-4 flex justify-end">
+        <button type="submit" disabled={saving} className="btn btn-solid btn-sm">
+          {saving ? 'Zapisywanie…' : 'Zapisz szczegóły'}
         </button>
-      ) : (
-        <form onSubmit={submit} className="rounded-xl border border-[#0F62FE]/20 bg-[#0F62FE]/[0.04] p-4">
-          <p className="text-xs font-bold text-white">Szczegóły spotkania</p>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            {match.status === 'SCHEDULED' && (
-              <>
-                <Field label="Uczestnik A">
-                  <select value={details.player1Id} onChange={(event) => update('player1Id', event.target.value)} className={INPUT_CLASS}>
-                    <option value="">Wybierz uczestnika</option>
-                    {participants.filter(({ user: participant }) => participant.id !== details.player2Id).map(({ user: participant }) => (
-                      <option key={participant.id} value={participant.id}>{participant.name}</option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label="Uczestnik B">
-                  <select value={details.player2Id} onChange={(event) => update('player2Id', event.target.value)} className={INPUT_CLASS}>
-                    <option value="">Wybierz uczestnika</option>
-                    {participants.filter(({ user: participant }) => participant.id !== details.player1Id).map(({ user: participant }) => (
-                      <option key={participant.id} value={participant.id}>{participant.name}</option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label="Runda">
-                  <input required type="number" min="1" max="64" step="1" value={details.round} onChange={(event) => update('round', event.target.value)} className={INPUT_CLASS} />
-                </Field>
-              </>
-            )}
-            <Field label="Boisko / stół">
-              <input maxLength="80" value={details.court} onChange={(event) => update('court', event.target.value)} placeholder="np. Boisko A" className={INPUT_CLASS} />
-            </Field>
-            <Field label="Termin meczu">
-              <input type="datetime-local" value={details.scheduledAt} onChange={(event) => update('scheduledAt', event.target.value)} className={INPUT_CLASS} />
-            </Field>
-            {match.status === 'SCHEDULED' && (
-              <Field label="Grupa">
-                <input maxLength="80" value={details.groupKey} onChange={(event) => update('groupKey', event.target.value)} placeholder="np. Grupa A" className={INPUT_CLASS} />
-              </Field>
-            )}
-          </div>
-          <div className="mt-4 flex justify-end gap-2">
-            <button type="button" disabled={saving} onClick={() => setEditing(false)} className="rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-300 disabled:opacity-50">Anuluj</button>
-            <button type="submit" disabled={saving} className="rounded-lg bg-[#0F62FE]/20 px-4 py-2 text-xs font-bold text-blue-100 transition hover:bg-[#0F62FE]/30 disabled:opacity-50">
-              {saving ? 'Zapisywanie…' : 'Zapisz szczegóły'}
-            </button>
-          </div>
-        </form>
-      )}
-    </div>
+      </div>
+    </form>
   );
 }
 
-const INPUT_CLASS = 'min-h-11 w-full rounded-xl border border-white/10 bg-[#090D16] px-3 text-sm text-white placeholder:text-slate-600 focus:border-[#0F62FE] focus:outline-none';
 const EMPTY_PARTICIPANTS = [];
 
 export default function OrganizerEventManagement() {
   const { id } = useParams();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const confirm = useConfirm();
   const [tournament, setTournament] = useState(null);
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState(() => (TAB_IDS.includes(location.state?.tab) ? location.state.tab : 'overview'));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState(null);
@@ -367,14 +315,7 @@ export default function OrganizerEventManagement() {
     return () => window.clearTimeout(timeout);
   }, [loadTournament]);
 
-  useEffect(() => {
-    if (!eventDetailsOpen) return undefined;
-    const closeOnEscape = (event) => {
-      if (event.key === 'Escape' && !savingEventDetails) setEventDetailsOpen(false);
-    };
-    window.addEventListener('keydown', closeOnEscape);
-    return () => window.removeEventListener('keydown', closeOnEscape);
-  }, [eventDetailsOpen, savingEventDetails]);
+  useTour('event', TOUR, { auto: true, ready: !loading && Boolean(tournament) });
 
   const participants = tournament?.participants || EMPTY_PARTICIPANTS;
   const matches = tournament?.matches || [];
@@ -439,7 +380,7 @@ export default function OrganizerEventManagement() {
   }
 
   async function removeParticipant(participant) {
-    if (!window.confirm(`Usunąć ${participant.user.name} z listy uczestników?`)) return;
+    if (!await confirm({ title: `Wypisać ${participant.user.name}?`, body: 'Uczestnik zniknie z listy zgłoszeń tego wydarzenia.', confirmLabel: 'Wypisz uczestnika', tone: 'danger' })) return;
     setRemovingId(participant.userId);
     setNotice('');
     try {
@@ -481,7 +422,7 @@ export default function OrganizerEventManagement() {
   }
 
   async function saveMatchResult(match, scores, status) {
-    if (status === 'FINISHED' && !window.confirm('Zatwierdzić końcowy wynik? Zakończonego meczu nie można ponownie otworzyć ani edytować.')) {
+    if (status === 'FINISHED' && !await confirm({ title: 'Zatwierdzić końcowy wynik?', body: `${match.player1?.name || 'Uczestnik A'} ${scores.score1} : ${scores.score2} ${match.player2?.name || 'Uczestnik B'}. Zakończonego meczu nie można ponownie otworzyć ani edytować.`, confirmLabel: 'Zatwierdź wynik' })) {
       return;
     }
     setSavingResultMatchId(match.id);
@@ -516,7 +457,7 @@ export default function OrganizerEventManagement() {
   async function deleteScheduledMatch(match) {
     const firstPlayer = match.player1?.name || 'uczestnik A';
     const secondPlayer = match.player2?.name || 'uczestnik B';
-    if (!window.confirm(`Usunąć zaplanowany mecz ${firstPlayer} vs ${secondPlayer}? Tej operacji nie można cofnąć.`)) return;
+    if (!await confirm({ title: 'Usunąć zaplanowany mecz?', body: `${firstPlayer} vs ${secondPlayer}. Tej operacji nie można cofnąć.`, confirmLabel: 'Usuń mecz', tone: 'danger' })) return;
     setDeletingMatchId(match.id);
     setNotice(null);
     try {
@@ -566,7 +507,7 @@ export default function OrganizerEventManagement() {
   }
 
   async function unassignReferee(match) {
-    if (!window.confirm(`Usunąć sędziego @${match.assignedReferee.username} z tego meczu?`)) return;
+    if (!await confirm({ title: 'Odłączyć sędziego?', body: `@${match.assignedReferee.username} straci dostęp do panelu tego meczu.`, confirmLabel: 'Usuń sędziego', tone: 'danger' })) return;
     setSavingRefereeMatchId(match.id);
     setNotice(null);
     try {
@@ -581,9 +522,11 @@ export default function OrganizerEventManagement() {
   }
 
   async function generateSchedule() {
-    const confirmed = window.confirm(
-      `Utworzyć automatyczny harmonogram „${FORMAT_LABELS[tournament.format] || tournament.format}” dla ${participants.length} uczestników? Operacja utworzy mecze dla całego wydarzenia i nie można jej cofnąć.`,
-    );
+    const confirmed = await confirm({
+      title: 'Utworzyć harmonogram?',
+      body: `Format „${FORMAT_LABELS[tournament.format] || tournament.format}”, ${participants.length} uczestników. Operacja utworzy mecze dla całego wydarzenia i nie można jej cofnąć.`,
+      confirmLabel: 'Utwórz mecze',
+    });
     if (!confirmed) return;
 
     setScheduleGenerating(true);
@@ -609,7 +552,7 @@ export default function OrganizerEventManagement() {
   }
 
   async function deleteEvent() {
-    if (!window.confirm(`Usunąć wydarzenie „${tournament.title}” razem ze zgłoszeniami, meczami i historią wyników? Tej operacji nie można cofnąć.`)) return;
+    if (!await confirm({ title: `Usunąć „${tournament.title}”?`, body: 'Razem z wydarzeniem znikną zgłoszenia, mecze i historia wyników. Tej operacji nie można cofnąć.', confirmLabel: 'Usuń wydarzenie', tone: 'danger' })) return;
     try {
       await api.delete(`/tournaments/${id}`);
       navigate('/organizer', { replace: true, state: { notice: `Wydarzenie „${tournament.title}” zostało usunięte.` } });
@@ -618,82 +561,122 @@ export default function OrganizerEventManagement() {
     }
   }
 
-  if (loading) {
-    return <main className="organizer-dashboard grid min-h-[calc(100vh-5rem)] place-items-center bg-[#090D16] text-white"><p className="animate-pulse text-sm text-slate-400">Ładowanie panelu wydarzenia…</p></main>;
-  }
+  if (loading) return <FullPageLoader label="Ładowanie panelu wydarzenia…" />;
   if (!tournament || !form) {
-    return <main className="organizer-dashboard min-h-[calc(100vh-5rem)] bg-[#090D16] px-5 py-10 text-white"><div className="mx-auto max-w-3xl rounded-2xl border border-rose-300/20 bg-rose-300/[0.06] p-5 text-sm text-rose-100" role="alert">{error || 'Nie znaleziono wydarzenia.'}<div><Link to="/organizer" className="mt-4 inline-flex text-xs font-bold text-white underline">Powrót do panelu</Link></div></div></main>;
+    return (
+      <main className="page">
+        <div className="shell-narrow grid gap-5">
+          <Notice tone="danger">{error || 'Nie znaleziono wydarzenia.'}</Notice>
+          <div><Link to="/organizer" className="btn btn-ghost"><Icon name="arrow-left" size={18} /> Powrót do panelu</Link></div>
+        </div>
+      </main>
+    );
   }
 
+  const seats = capacity(participants.length, tournament.maxParticipants);
+  const liveMatches = matches.filter((match) => match.status === 'IN_PROGRESS').length;
+  const playable = (match) => Boolean(match.player1Id && match.player2Id);
+  const withoutReferee = matches.filter((match) => match.status === 'SCHEDULED' && playable(match) && !match.assignedReferee).length;
+  const doubleEliminationBlocked = tournament.format === 'DOUBLE_ELIMINATION'
+    && (participants.length & (participants.length - 1)) !== 0;
+
+  /* The plan turns the whole job into four stages and always points at the next one. */
+  const plan = [
+    {
+      id: 'signups',
+      title: 'Zbierz zgłoszenia',
+      done: participants.length >= 2,
+      detail: `${participants.length} z ${tournament.maxParticipants} miejsc zajętych`,
+      help: 'Udostępnij uczestnikom stronę wydarzenia — zapisują się sami. Do harmonogramu potrzeba co najmniej dwóch osób.',
+      action: { label: 'Otwórz stronę zapisów', to: `/tournaments/${id}` },
+    },
+    {
+      id: 'schedule',
+      title: 'Utwórz harmonogram',
+      done: matches.length > 0,
+      detail: matches.length ? `${matches.length} ${plural(matches.length, 'mecz', 'mecze', 'meczów')} w harmonogramie` : 'Brak meczów',
+      help: 'Jedno kliknięcie utworzy wszystkie mecze zgodnie z formatem wydarzenia. Możesz też dodawać mecze ręcznie.',
+      action: { label: 'Przejdź do harmonogramu', tab: 'matches' },
+    },
+    {
+      id: 'referees',
+      title: 'Przydziel sędziów',
+      done: matches.length > 0 && withoutReferee === 0,
+      detail: matches.length ? (withoutReferee ? `${withoutReferee} ${plural(withoutReferee, 'mecz czeka', 'mecze czekają', 'meczów czeka')} na sędziego` : 'Wszystkie mecze obsadzone') : 'Najpierw utwórz mecze',
+      help: 'Rozwiń sekcję „Sędzia” przy meczu i wpisz nazwę użytkownika konta sędziego.',
+      action: { label: 'Przydziel sędziów', tab: 'matches' },
+    },
+    {
+      id: 'results',
+      title: 'Rozegraj mecze',
+      done: matches.length > 0 && finishedMatches === matches.length,
+      detail: matches.length ? `${finishedMatches} z ${matches.length} zakończonych` : 'Czeka na harmonogram',
+      help: 'Sędziowie wprowadzają wyniki na żywo. W razie potrzeby wynik wpiszesz też samodzielnie w sekcji „Wynik”.',
+      action: { label: 'Zobacz mecze', tab: 'matches' },
+    },
+  ];
+  const currentIndex = plan.findIndex((stage) => !stage.done);
+  const currentStage = currentIndex === -1 ? null : plan[currentIndex];
+  const tabs = [
+    { id: 'overview', label: 'Przegląd', icon: 'grid' },
+    { id: 'participants', label: 'Uczestnicy', icon: 'users', badge: participants.length || null },
+    { id: 'matches', label: 'Mecze i sędziowie', icon: 'whistle', badge: liveMatches || null, badgeTone: 'live' },
+    { id: 'settings', label: 'Ustawienia', icon: 'sliders' },
+  ];
+
   return (
-    <main className="organizer-dashboard min-h-[calc(100vh-5rem)] overflow-hidden bg-[#090D16] px-4 py-7 text-white sm:px-6 lg:px-8">
-      <div className="organizer-aurora organizer-aurora-one" aria-hidden="true" />
-      <div className="organizer-aurora organizer-aurora-two" aria-hidden="true" />
-      <div className="relative mx-auto max-w-[1320px]">
-        <Link to="/organizer" className="organizer-reveal inline-flex items-center gap-2 text-xs font-semibold text-slate-400 transition hover:text-white">← Panel organizatora</Link>
-        <header className="organizer-reveal mb-7 mt-5 flex flex-col gap-5 rounded-3xl border border-white/[0.08] bg-[#111827]/85 p-5 sm:p-7 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <div className="flex flex-wrap items-center gap-3">
-              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#81C7FF]">Centrum zarządzania wydarzeniem</p>
-              <span className={`rounded-full px-3 py-1 text-[10px] font-bold ${STATUS_STYLES[tournament.status] || STATUS_STYLES.DRAFT}`}>{STATUS_LABELS[tournament.status] || tournament.status}</span>
+    <main className="page">
+      <div className="shell">
+        <BackLink to="/organizer">Panel organizatora</BackLink>
+
+        <header className="mb-8 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+          <div className="min-w-0">
+            <div className="mb-4 flex flex-wrap items-center gap-3">
+              <p className="eyebrow">Zarządzanie wydarzeniem</p>
+              <StatusChip status={tournament.status} />
             </div>
-            <h1 className="mt-2 text-3xl font-black tracking-[-0.05em] sm:text-4xl">{tournament.title}</h1>
-            <p className="mt-2 text-sm text-slate-400">{dateLabel(tournament.date)}{tournament.location ? ` · ${tournament.location}` : ''}</p>
+            <Title>{tournament.title}</Title>
+            <p className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-[0.9375rem] text-muted">
+              <span className="flex items-center gap-2"><Icon name="calendar" size={17} />{dateLabel(tournament.date)}</span>
+              {tournament.location && <span className="flex items-center gap-2"><Icon name="pin" size={17} />{tournament.location}</span>}
+            </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Link to={`/tournaments/${id}`} className="rounded-xl border border-white/10 px-4 py-3 text-xs font-bold text-slate-200 transition hover:bg-white/[0.04]">Podgląd publiczny ↗</Link>
-            <button type="button" onClick={openEventDetails} className="organizer-primary-button rounded-xl px-4 py-3 text-xs font-bold text-white">Edytuj wydarzenie</button>
+          <div className="flex flex-wrap gap-2" data-tour="event-actions">
+            <Link to={`/tournaments/${id}`} className="btn btn-ghost"><Icon name="eye" size={18} /> Podgląd publiczny</Link>
+            <button type="button" onClick={openEventDetails} className="btn btn-solid"><Icon name="edit" size={18} /> Termin i miejsce</button>
           </div>
         </header>
 
         {notice && (
-          <div
-            className={`mb-5 flex items-start gap-3 rounded-2xl border p-4 text-sm ${notice.type === 'error' ? 'border-rose-300/25 bg-rose-300/[0.07] text-rose-100' : 'border-emerald-300/20 bg-emerald-300/[0.06] text-emerald-100'}`}
-            role={notice.type === 'error' ? 'alert' : 'status'}
-            aria-live={notice.type === 'error' ? 'assertive' : 'polite'}
-          >
-            <span aria-hidden="true" className="font-black">{notice.type === 'error' ? '!' : '✓'}</span>
-            <span>{notice.message}</span>
-            <button type="button" onClick={() => setNotice(null)} className="ml-auto shrink-0 rounded px-2 text-current/70 hover:text-current" aria-label="Zamknij powiadomienie">
-              ×
-            </button>
-          </div>
+          <Notice key={notice.message} tone={notice.type === 'error' ? 'danger' : 'ok'} className="mb-6" onClose={() => setNotice(null)}>
+            {notice.message}
+          </Notice>
         )}
-        {error && <div className="mb-5 rounded-2xl border border-rose-300/20 bg-rose-300/[0.06] p-4 text-sm text-rose-100" role="alert">{error}</div>}
+        {error && <Notice tone="danger" className="mb-6">{error}</Notice>}
 
         {eventDetailsOpen && (
-          <div className="fixed inset-0 z-[70] grid place-items-center overflow-y-auto bg-[#03060c]/80 p-4 backdrop-blur-sm">
-            <section
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="event-details-title"
-              className="w-full max-w-xl rounded-3xl border border-white/10 bg-[#111827] p-5 shadow-2xl shadow-black/50 sm:p-7"
-            >
+          <Modal labelledBy="event-details-title" onClose={() => setEventDetailsOpen(false)} busy={savingEventDetails} className="!w-[min(100%,34rem)]">
+            <div className="p-6 sm:p-7">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#81C7FF]">Szczegóły wydarzenia</p>
-                  <h2 id="event-details-title" className="mt-2 text-2xl font-black text-white">Edytuj wydarzenie</h2>
-                  <p className="mt-2 text-sm text-slate-400">Ustaw termin rozpoczęcia oraz lokalizację lub boisko wydarzenia.</p>
+                  <p className="eyebrow mb-3">Szczegóły wydarzenia</p>
+                  <h2 id="event-details-title" className="h-section">Termin i miejsce</h2>
+                  <p className="mt-2 text-sm text-muted">Ustaw termin rozpoczęcia oraz lokalizację lub boisko wydarzenia.</p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setEventDetailsOpen(false)}
-                  disabled={savingEventDetails}
-                  aria-label="Zamknij panel edycji"
-                  className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-white/10 text-lg text-slate-400 transition hover:bg-white/[0.06] hover:text-white disabled:opacity-50"
-                >
-                  ×
+                <button type="button" onClick={() => setEventDetailsOpen(false)} disabled={savingEventDetails} aria-label="Zamknij panel edycji" className="icon-btn">
+                  <Icon name="x" size={19} />
                 </button>
               </div>
               <form onSubmit={saveEventDetails} className="mt-6">
-                <div className="space-y-4">
+                <div className="grid gap-5">
                   <Field label="Data i godzina wydarzenia">
                     <input
                       required
                       type="datetime-local"
+                      data-autofocus
                       value={eventDetailsForm.date}
                       onChange={(event) => setEventDetailsForm((current) => ({ ...current, date: event.target.value }))}
-                      className={INPUT_CLASS}
+                      className="input"
                     />
                   </Field>
                   <Field label="Lokalizacja / boisko" hint="Podaj adres, nazwę obiektu lub numer boiska.">
@@ -702,269 +685,408 @@ export default function OrganizerEventManagement() {
                       value={eventDetailsForm.location}
                       onChange={(event) => setEventDetailsForm((current) => ({ ...current, location: event.target.value }))}
                       placeholder="np. Hala Miejska · Boisko 2"
-                      className={INPUT_CLASS}
+                      className="input"
                     />
                   </Field>
                 </div>
-                <div className="mt-7 flex flex-wrap justify-end gap-3 border-t border-white/[0.06] pt-5">
-                  <button type="button" disabled={savingEventDetails} onClick={() => setEventDetailsOpen(false)} className="min-h-11 rounded-xl border border-white/10 px-4 text-xs font-bold text-slate-300 transition hover:bg-white/[0.04] disabled:opacity-50">Anuluj</button>
-                  <button type="submit" disabled={savingEventDetails || !eventDetailsForm.date} className="organizer-primary-button min-h-11 rounded-xl px-5 text-xs font-bold text-white disabled:opacity-50">
+                <div className="mt-7 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                  <button type="button" disabled={savingEventDetails} onClick={() => setEventDetailsOpen(false)} className="btn btn-ghost">Anuluj</button>
+                  <button type="submit" disabled={savingEventDetails || !eventDetailsForm.date} className="btn btn-primary">
                     {savingEventDetails ? 'Zapisywanie…' : 'Zapisz szczegóły'}
                   </button>
                 </div>
               </form>
-            </section>
+            </div>
+          </Modal>
+        )}
+
+        <Reveal as="section" className="card mb-8 overflow-hidden" aria-labelledby="plan-heading" data-tour="event-plan">
+          <div className="flex flex-col gap-4 border-b border-line p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+            <div className="min-w-0">
+              <p className="eyebrow eyebrow-plain mb-1.5">Plan wydarzenia</p>
+              <h2 id="plan-heading" className="h-section">
+                {currentStage ? <>Następny krok: <span className="marker">{currentStage.title}</span></> : 'Wszystko rozegrane'}
+              </h2>
+              <p className="mt-2 max-w-2xl text-[0.9375rem] leading-relaxed text-muted">
+                {currentStage ? currentStage.help : 'Wszystkie mecze są zakończone. Możesz zmienić status wydarzenia na „Zakończony” w ustawieniach.'}
+              </p>
+            </div>
+            {currentStage && (
+              currentStage.action.to
+                ? <Link to={currentStage.action.to} className="btn btn-primary shrink-0">{currentStage.action.label} <Arrow /></Link>
+                : <button type="button" onClick={() => setActiveTab(currentStage.action.tab)} className="btn btn-primary shrink-0">{currentStage.action.label} <Arrow /></button>
+            )}
+            {!currentStage && tournament.status === 'IN_PROGRESS' && (
+              <button type="button" onClick={() => setActiveTab('settings')} className="btn btn-primary shrink-0">Przejdź do ustawień <Arrow /></button>
+            )}
           </div>
-        )}
+          <ol className="steps p-4 sm:grid-cols-2 sm:p-5 xl:grid-cols-4">
+            {plan.map((stage, index) => {
+              const state = stage.done ? 'done' : index === currentIndex ? 'current' : 'todo';
+              return (
+                <li key={stage.id} className="step" data-state={state} aria-current={state === 'current' ? 'step' : undefined}>
+                  <span className="step-index">{stage.done ? <Icon name="check" size={16} strokeWidth={2.5} /> : index + 1}</span>
+                  <span className="min-w-0">
+                    <span className="block font-semibold text-ink">{stage.title}</span>
+                    <span className="mt-0.5 block text-sm text-muted">{stage.detail}</span>
+                  </span>
+                </li>
+              );
+            })}
+          </ol>
+        </Reveal>
 
-        <section className="mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <SummaryCard label="Zgłoszeni uczestnicy" value={`${participants.length}/${tournament.maxParticipants}`} sublabel={`${Math.max(0, tournament.maxParticipants - participants.length)} wolnych miejsc`} accent="from-blue-500/[0.12] to-transparent" />
-          <SummaryCard label="Wszystkie mecze" value={matches.length} sublabel="Zaplanowane w tym wydarzeniu" accent="from-violet-500/[0.12] to-transparent" />
-          <SummaryCard label="Mecze na żywo" value={matches.filter((match) => match.status === 'IN_PROGRESS').length} sublabel="Aktualnie rozgrywane" accent="from-emerald-500/[0.12] to-transparent" />
-          <SummaryCard label="Postęp rozgrywek" value={`${progress}%`} sublabel={`${finishedMatches} zakończonych meczów`} accent="from-cyan-500/[0.12] to-transparent" />
-        </section>
+        <Tabs tabs={tabs} value={activeTab} onChange={setActiveTab} label="Zarządzanie wydarzeniem" className="mb-8" data-tour="event-tabs" />
 
-        <nav aria-label="Zarządzanie wydarzeniem" className="mb-6 flex gap-2 overflow-x-auto border-b border-white/[0.07] pb-3">
-          {TABS.map((tab) => <button key={tab.id} type="button" onClick={() => setActiveTab(tab.id)} aria-current={activeTab === tab.id ? 'page' : undefined} className={`flex shrink-0 items-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold transition ${activeTab === tab.id ? 'bg-white/[0.08] text-white shadow-[inset_0_-2px_0_#39B4FE]' : 'text-slate-500 hover:bg-white/[0.04] hover:text-slate-200'}`}><span className="text-[#39B4FE]">{tab.icon}</span>{tab.label}</button>)}
-        </nav>
-
-        {activeTab === 'overview' && (
-          <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
-            <section className="rounded-3xl border border-white/[0.08] bg-[#111827]/75 p-5 sm:p-6">
-              <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Szybki dostęp</p>
-              <h2 className="mt-1 text-xl font-bold">Co chcesz zrobić?</h2>
-              <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                {[['participants', 'Przejrzyj zgłoszenia', `${participants.length} uczestników`, '◎'], ['matches', 'Zarządzaj meczami', `${matches.length} w harmonogramie`, '◉'], ['settings', 'Edytuj wydarzenie', 'Data, godzina i lokalizacja', '⚙']].map(([tab, title, detail, icon]) => <button key={tab} type="button" onClick={() => (tab === 'settings' ? openEventDetails() : setActiveTab(tab))} className="group flex items-center gap-4 rounded-2xl border border-white/[0.07] bg-[#0C1220]/80 p-4 text-left transition hover:-translate-y-0.5 hover:border-[#0F62FE]/40"><span className="grid h-11 w-11 place-items-center rounded-xl bg-gradient-to-br from-[#0F62FE]/20 to-[#8A3FFC]/20 text-lg text-[#81C7FF]">{icon}</span><span><span className="block text-sm font-bold text-white">{title}</span><span className="mt-1 block text-xs text-slate-500">{detail}</span></span><span className="ml-auto text-slate-600 transition group-hover:translate-x-1 group-hover:text-white">→</span></button>)}
-              </div>
-            </section>
-            <section className="rounded-3xl border border-white/[0.08] bg-[#111827]/75 p-5 sm:p-6">
-              <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Informacje</p>
-              <h2 className="mt-1 text-xl font-bold">Szczegóły wydarzenia</h2>
-              <dl className="mt-5 space-y-4 text-sm">
-                <div className="flex justify-between gap-4 border-b border-white/[0.06] pb-3"><dt className="text-slate-500">Dyscyplina</dt><dd className="text-right font-semibold">{tournament.sportType}</dd></div>
-                <div className="flex justify-between gap-4 border-b border-white/[0.06] pb-3"><dt className="text-slate-500">Format</dt><dd className="text-right font-semibold">{tournament.format || 'Nie określono'}</dd></div>
-                <div className="flex justify-between gap-4 border-b border-white/[0.06] pb-3"><dt className="text-slate-500">Rodzaj zgłoszeń</dt><dd className="text-right font-semibold">{tournament.registrationType === 'TEAM' ? 'Drużynowe' : 'Indywidualne'}</dd></div>
-                <div className="flex justify-between gap-4"><dt className="text-slate-500">Termin zapisów</dt><dd className="text-right font-semibold">{tournament.registrationDeadline ? dateLabel(tournament.registrationDeadline) : 'Nie określono'}</dd></div>
-              </dl>
-            </section>
-            <section className="rounded-3xl border border-white/[0.08] bg-[#111827]/75 p-5 sm:col-span-2 sm:p-6">
-              <div className="mb-4 flex items-center justify-between gap-3"><div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Harmonogram</p><h2 className="mt-1 text-xl font-bold">Ostatnie mecze</h2></div><button type="button" onClick={() => setActiveTab('matches')} className="text-xs font-semibold text-[#81C7FF]">Wszystkie →</button></div>
-              {matches.length ? <div className="grid gap-3 md:grid-cols-2">{matches.slice(0, 4).map((match) => <div key={match.id} className="flex items-center justify-between gap-4 rounded-2xl border border-white/[0.06] bg-[#0C1220]/75 p-4"><div className="min-w-0"><p className="truncate text-sm font-bold">{match.player1?.name || 'Oczekuje'} <span className="text-slate-500">vs</span> {match.player2?.name || 'Oczekuje'}</p><p className="mt-1 text-xs text-slate-500">Runda {match.round}{match.court ? ` · ${match.court}` : ''}</p>{match.scheduledAt && <p className="mt-1 text-xs text-[#81C7FF]">{dateLabel(match.scheduledAt)}</p>}</div><span className="shrink-0 font-mono text-sm text-slate-300">{match.status === 'FINISHED' ? `${match.score1} : ${match.score2}` : STATUS_LABELS[match.status]}</span></div>)}</div> : <p className="rounded-xl border border-dashed border-white/10 p-5 text-sm text-slate-500">Brak zaplanowanych meczów. Dodaj pierwszy mecz w zakładce „Mecze i sędziowie”.</p>}
-            </section>
-          </div>
-        )}
-
-        {activeTab === 'participants' && (
-          <section className="overflow-hidden rounded-3xl border border-white/[0.08] bg-[#111827]/80">
-            <div className="flex flex-wrap items-end justify-between gap-3 border-b border-white/[0.06] p-5 sm:p-6"><div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Rejestr zgłoszeń</p><h2 className="mt-1 text-xl font-bold">Uczestnicy <span className="text-slate-500">({participants.length})</span></h2></div><span className="text-xs text-slate-500">Limit miejsc: {tournament.maxParticipants}</span></div>
-            {participants.length ? <div className="overflow-x-auto"><table className="w-full min-w-[640px] text-left text-sm"><thead className="text-[10px] uppercase tracking-[0.14em] text-slate-500"><tr><th className="px-5 py-3 font-semibold">Uczestnik</th><th className="px-5 py-3 font-semibold">Zgłoszono</th><th className="px-5 py-3 font-semibold">Status</th><th className="px-5 py-3 text-right font-semibold">Akcja</th></tr></thead><tbody className="divide-y divide-white/[0.05]">{participants.map((participant) => <tr key={participant.id} className="transition hover:bg-white/[0.02]"><td className="px-5 py-4"><div className="flex items-center gap-3"><span className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-[#0F62FE]/30 to-[#8A3FFC]/30 font-bold">{participant.user.name.charAt(0).toUpperCase()}</span><div><p className="font-semibold text-white">{participant.user.name}</p><p className="mt-0.5 text-xs text-slate-500">{participant.user.email}</p></div></div></td><td className="px-5 py-4 text-slate-400">{dateLabel(participant.joinedAt)}</td><td className="px-5 py-4"><span className="rounded-full bg-emerald-300/10 px-2.5 py-1 text-[10px] font-bold text-emerald-200">Zapisany</span></td><td className="px-5 py-4 text-right"><button type="button" disabled={Boolean(removingId)} onClick={() => removeParticipant(participant)} className="rounded-lg border border-rose-300/15 px-3 py-2 text-xs font-semibold text-rose-200 transition hover:bg-rose-300/10 disabled:opacity-50">{removingId === participant.userId ? 'Usuwanie…' : 'Wypisz'}</button></td></tr>)}</tbody></table></div> : <div className="p-12 text-center"><p className="font-bold text-white">Brak zgłoszeń</p><p className="mt-2 text-sm text-slate-500">Uczestnicy pojawią się tutaj po zapisaniu się na wydarzenie.</p></div>}
-          </section>
-        )}
-
-        {activeTab === 'matches' && (
-          <div className="grid gap-5 xl:grid-cols-[0.75fr_1.25fr]">
-            <div className="space-y-5">
-              <section className="rounded-3xl border border-[#0F62FE]/20 bg-gradient-to-br from-[#0F62FE]/[0.1] via-[#111827]/90 to-[#8A3FFC]/[0.09] p-5 sm:p-6">
-                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#81C7FF]">Szybki start</p>
-                <h2 className="mt-1 text-xl font-bold">Automatyczny harmonogram</h2>
-                <p className="mt-2 text-xs leading-5 text-slate-400">
-                  {FORMAT_LABELS[tournament.format] || tournament.format || 'Wybierz format wydarzenia'} · {participants.length} zapisanych uczestników.
-                  {tournament.format === 'ROUND_ROBIN' && ' Każdy zagra z każdym.'}
-                  {tournament.format === 'SINGLE_ELIMINATION' && ' Zwycięzcy awansują dalej, wolne losy zostaną obsłużone automatycznie.'}
-                  {tournament.format === 'DOUBLE_ELIMINATION' && ' Drabinka zwycięzców i przegranych zakończy się finałem.'}
-                  {tournament.format === 'GROUP_STAGE' && ' Uczestnicy zostaną podzieleni na grupy, a mecze w każdej grupie ułożone w rundy.'}
-                </p>
-                <button
-                  type="button"
-                  onClick={generateSchedule}
-                  disabled={scheduleGenerating
-                    || matches.length > 0
-                    || participants.length < 2
-                    || !FORMAT_LABELS[tournament.format]
-                    || (tournament.format === 'DOUBLE_ELIMINATION'
-                      && (participants.length & (participants.length - 1)) !== 0)}
-                  className="organizer-primary-button mt-4 min-h-12 w-full rounded-xl px-4 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {scheduleGenerating ? 'Generowanie…' : '✦ Utwórz harmonogram automatycznie'}
-                </button>
-                {scheduleNotice && (
-                  <div
-                    className={`mt-3 flex items-start gap-2 rounded-xl border p-3 text-xs leading-5 ${scheduleNotice.type === 'error' ? 'border-rose-300/20 bg-rose-300/[0.06] text-rose-100' : 'border-emerald-300/20 bg-emerald-300/[0.06] text-emerald-100'}`}
-                    role={scheduleNotice.type === 'error' ? 'alert' : 'status'}
-                    aria-live={scheduleNotice.type === 'error' ? 'assertive' : 'polite'}
-                  >
-                    <span aria-hidden="true" className="font-black">{scheduleNotice.type === 'error' ? '!' : '✓'}</span>
-                    <span>{scheduleNotice.message}</span>
-                    <button
-                      type="button"
-                      onClick={() => setScheduleNotice(null)}
-                      className="ml-auto shrink-0 rounded px-1 text-current/70 hover:text-current"
-                      aria-label="Zamknij powiadomienie o harmonogramie"
-                    >
-                      ×
-                    </button>
-                  </div>
-                )}
-                {matches.length > 0 && <p className="mt-2 text-[11px] text-amber-200">Harmonogram już istnieje. Automatyczne generowanie nie nadpisuje rozegranych ani zaplanowanych meczów.</p>}
-                {participants.length < 2 && <p className="mt-2 text-[11px] text-amber-200">Zapisz co najmniej dwóch uczestników, aby wygenerować mecze.</p>}
-                {tournament.format === 'DOUBLE_ELIMINATION' && participants.length >= 4 && (participants.length & (participants.length - 1)) !== 0 && <p className="mt-2 text-[11px] text-amber-200">Pełna drabinka podwójnej eliminacji wymaga liczby uczestników będącej potęgą dwójki.</p>}
-                {tournament.format === 'GROUP_STAGE' && <p className="mt-2 text-[11px] text-slate-500">Po zakończeniu fazy grupowej dodaj mecze play-off ręcznie.</p>}
+        <TabPanel id={activeTab}>
+          {activeTab === 'overview' && (
+            <div className="grid gap-10">
+              <section className="grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Podsumowanie wydarzenia">
+                <StatTile label="Zgłoszeni uczestnicy" value={`${seats.taken}/${seats.limit}`} detail={`${seats.free} ${plural(seats.free, 'wolne miejsce', 'wolne miejsca', 'wolnych miejsc')}`} icon="users" />
+                <StatTile label="Wszystkie mecze" value={matches.length} detail="Zaplanowane w tym wydarzeniu" icon="list" />
+                <StatTile label="Mecze na żywo" value={liveMatches} detail="Aktualnie rozgrywane" icon="bolt" tone={liveMatches ? 'live' : undefined} />
+                <StatTile label="Postęp rozgrywek" value={progress} suffix="%" detail={`${finishedMatches} ${plural(finishedMatches, 'zakończony mecz', 'zakończone mecze', 'zakończonych meczów')}`} icon="check" />
               </section>
 
-              <form onSubmit={createMatch} className="h-fit rounded-3xl border border-white/[0.08] bg-[#111827]/80 p-5 sm:p-6">
-              <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#81C7FF]">Harmonogram</p><h2 className="mt-1 text-xl font-bold">Dodaj mecz</h2>
-              <div className="mt-5 space-y-4">
-                <Field label="Uczestnik A"><select required value={matchForm.player1Id} onChange={(event) => setMatchForm((current) => ({ ...current, player1Id: event.target.value }))} className={INPUT_CLASS}><option value="">Wybierz uczestnika</option>{participants.map(({ user: participant }) => <option key={participant.id} value={participant.id}>{participant.name}</option>)}</select></Field>
-                <Field label="Uczestnik B"><select required value={matchForm.player2Id} onChange={(event) => setMatchForm((current) => ({ ...current, player2Id: event.target.value }))} className={INPUT_CLASS}><option value="">Wybierz uczestnika</option>{participants.filter(({ user: participant }) => participant.id !== matchForm.player1Id).map(({ user: participant }) => <option key={participant.id} value={participant.id}>{participant.name}</option>)}</select></Field>
-                <div className="grid grid-cols-2 gap-3"><Field label="Runda"><input required min="1" max="64" type="number" value={matchForm.round} onChange={(event) => setMatchForm((current) => ({ ...current, round: event.target.value }))} className={INPUT_CLASS} /></Field><Field label="Boisko / stół"><input maxLength="80" value={matchForm.court} onChange={(event) => setMatchForm((current) => ({ ...current, court: event.target.value }))} placeholder="np. Boisko A" className={INPUT_CLASS} /></Field></div>
-                <Field label="Termin meczu"><input type="datetime-local" value={matchForm.scheduledAt} onChange={(event) => setMatchForm((current) => ({ ...current, scheduledAt: event.target.value }))} className={INPUT_CLASS} /></Field>
-                {['ROUND_ROBIN', 'GROUP_STAGE'].includes(tournament.format) && <Field label="Grupa"><input maxLength="80" value={matchForm.groupKey} onChange={(event) => setMatchForm((current) => ({ ...current, groupKey: event.target.value }))} placeholder="np. Grupa A" className={INPUT_CLASS} /></Field>}
-                <button type="submit" disabled={matchSaving || participants.length < 2} className="organizer-primary-button min-h-12 w-full rounded-xl px-4 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40">{matchSaving ? 'Dodawanie…' : '＋ Dodaj do harmonogramu'}</button>
-                {participants.length < 2 && <p className="text-xs text-amber-200">Do utworzenia meczu potrzebujesz co najmniej dwóch zgłoszonych uczestników.</p>}
-              </div>
-              </form>
-            </div>
+              <div className="grid gap-10 xl:grid-cols-[1.2fr_0.8fr] xl:gap-8">
+                <section>
+                  <SectionHeading
+                    eyebrow="Harmonogram"
+                    title="Ostatnie mecze"
+                    action={<button type="button" onClick={() => setActiveTab('matches')} className="link text-sm">Wszystkie <Icon name="arrow-right" size={15} /></button>}
+                  />
+                  {matches.length ? (
+                    <div className="grid gap-3">
+                      {matches.slice(0, 4).map((match) => (
+                        <div key={match.id} className="card flex items-center justify-between gap-4 p-4">
+                          <div className="min-w-0">
+                            <p className="break-words font-semibold text-ink">{match.player1?.name || 'Oczekuje'} <span className="text-muted">vs</span> {match.player2?.name || 'Oczekuje'}</p>
+                            <p className="mono mt-1 text-xs text-muted">
+                              Runda {match.round}{match.court ? ` · ${match.court}` : ''}{match.scheduledAt ? ` · ${formatDateTime(match.scheduledAt)}` : ''}
+                            </p>
+                          </div>
+                          {match.status === 'FINISHED'
+                            ? <span className="num shrink-0 text-3xl">{match.score1}:{match.score2}</span>
+                            : <StatusChip status={match.status} kind="match" />}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="well p-5 text-sm text-muted">Brak zaplanowanych meczów. Utwórz harmonogram w zakładce „Mecze i sędziowie”.</p>
+                  )}
+                </section>
 
-            <section className="rounded-3xl border border-white/[0.08] bg-[#111827]/80 p-5 sm:p-6">
-              <div className="mb-5"><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Obsada i wyniki</p><h2 className="mt-1 text-xl font-bold">Mecze <span className="text-slate-500">({matches.length})</span></h2></div>
-              {matches.length ? (
-                <div className="space-y-3">
-                  {matches.map((match) => (
-                    <article key={match.id} className="rounded-2xl border border-white/[0.07] bg-[#0C1220]/80 p-4">
-                      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">
-                              Runda {match.round}{match.groupKey ? ` · ${match.groupKey}` : ''}{match.court ? ` · ${match.court}` : ''}
-                            </span>
-                            <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${STATUS_STYLES[match.status] || STATUS_STYLES.DRAFT}`}>
-                              {STATUS_LABELS[match.status] || match.status}
-                            </span>
-                          </div>
-                          {match.scheduledAt && <p className="mt-1 text-xs text-[#81C7FF]">{dateLabel(match.scheduledAt)}</p>}
-                          <p className="mt-2 truncate text-sm font-bold text-white">
-                            {match.player1?.name || 'Oczekuje na awans'}
-                            <span className="mx-1 text-slate-500">vs</span>
-                            {match.player2?.name || 'Oczekuje na awans'}
-                          </p>
-                        </div>
-                        <Link
-                          to={`/tournaments/${tournament.id}/matches/${match.id}/live`}
-                          className="shrink-0 rounded-lg border border-[#0F62FE]/25 bg-[#0F62FE]/10 px-3 py-2 text-xs font-semibold text-blue-200 transition hover:bg-[#0F62FE]/20"
-                        >
-                          Śledź wynik{match.status === 'IN_PROGRESS' ? ' · LIVE' : ''}
-                        </Link>
-                        {match.status === 'SCHEDULED' && (
-                          <button
-                            type="button"
-                            disabled={deletingMatchId === match.id}
-                            onClick={() => { void deleteScheduledMatch(match); }}
-                            className="shrink-0 rounded-lg border border-rose-300/15 px-3 py-2 text-xs font-semibold text-rose-200 transition hover:bg-rose-300/10 disabled:opacity-50"
-                          >
-                            {deletingMatchId === match.id ? 'Usuwanie…' : 'Usuń mecz'}
-                          </button>
-                        )}
+                <section>
+                  <SectionHeading eyebrow="Informacje" title="Szczegóły" />
+                  <dl className="card divide-y divide-line">
+                    {[
+                      ['Dyscyplina', sportLabel(tournament.sportType)],
+                      ['Format', FORMAT_LABELS[tournament.format] || tournament.format || 'Nie określono'],
+                      ['Rodzaj zgłoszeń', tournament.registrationType === 'TEAM' ? 'Drużynowe' : 'Indywidualne'],
+                      ['Termin zapisów', tournament.registrationDeadline ? dateLabel(tournament.registrationDeadline) : 'Nie określono'],
+                    ].map(([label, value]) => (
+                      <div key={label} className="flex justify-between gap-4 px-5 py-3.5 text-[0.9375rem]">
+                        <dt className="text-muted">{label}</dt>
+                        <dd className="text-right font-semibold text-ink">{value}</dd>
                       </div>
-                      <MatchDetailsEditor
-                        key={`${match.id}-${match.player1Id || ''}-${match.player2Id || ''}-${match.round}-${match.groupKey || ''}-${match.court || ''}-${match.scheduledAt || ''}`}
-                        match={match}
-                        participants={participants}
-                        onSave={saveMatchDetails}
-                        saving={savingDetailsMatchId === match.id}
-                      />
-                      {match.assignedReferee && (
-                        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#8A3FFC]/20 bg-[#8A3FFC]/[0.06] p-3">
-                          <div>
-                            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-violet-200">Przydzielony sędzia</p>
-                            <p className="mt-1 text-sm font-semibold text-white">{match.assignedReferee.name} <span className="font-normal text-violet-200">@{match.assignedReferee.username}</span></p>
-                          </div>
-                          <div className="flex flex-wrap gap-2">
-                            <Link to={`/referee/${match.id}`} className="rounded-lg bg-[#8A3FFC]/20 px-3 py-2 text-xs font-semibold text-violet-100 hover:bg-[#8A3FFC]/30">Panel sędziego ↗</Link>
-                            <button type="button" disabled={savingRefereeMatchId === match.id} onClick={() => unassignReferee(match)} className="rounded-lg border border-rose-300/15 px-3 py-2 text-xs font-semibold text-rose-200 hover:bg-rose-300/10 disabled:opacity-50">
-                              {savingRefereeMatchId === match.id ? 'Zapisywanie…' : 'Usuń sędziego'}
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                      <div className="mt-4 rounded-xl border border-white/[0.06] bg-black/20 p-3">
-                        <form onSubmit={(event) => { event.preventDefault(); void assignReferee(match); }} className="flex flex-col gap-2 sm:flex-row">
-                          <label className="sr-only" htmlFor={`referee-username-${match.id}`}>Nazwa użytkownika sędziego</label>
-                          <input
-                            id={`referee-username-${match.id}`}
-                            type="text"
-                            required
-                            minLength="3"
-                            maxLength="24"
-                            pattern="[A-Za-z0-9_]{3,24}"
-                            autoComplete="off"
-                            placeholder="Nazwa użytkownika sędziego"
-                            value={refereeUsernames[match.id] ?? match.assignedReferee?.username ?? ''}
-                            onChange={(event) => {
-                              setRefereeUsernames((current) => ({ ...current, [match.id]: event.target.value }));
-                              setRefereeNotifications((current) => ({ ...current, [match.id]: null }));
-                            }}
-                            className="min-h-10 min-w-0 flex-1 rounded-lg border border-white/10 bg-[#090D16] px-3 text-sm text-white placeholder:text-slate-600 focus:border-[#8A3FFC] focus:outline-none"
-                          />
-                          <button type="submit" disabled={savingRefereeMatchId === match.id} className="rounded-lg bg-[#8A3FFC]/20 px-4 py-2 text-xs font-semibold text-violet-100 transition hover:bg-[#8A3FFC]/30 disabled:opacity-50">
-                            {savingRefereeMatchId === match.id ? 'Zapisywanie…' : match.assignedReferee ? 'Zmień sędziego' : 'Przydziel sędziego'}
-                          </button>
-                        </form>
-                        {refereeNotifications[match.id] && (
-                          <p
-                            className={`mt-2 flex items-start gap-2 text-xs ${refereeNotifications[match.id].type === 'error' ? 'text-rose-200' : 'text-emerald-200'}`}
-                            role={refereeNotifications[match.id].type === 'error' ? 'alert' : 'status'}
-                            aria-live={refereeNotifications[match.id].type === 'error' ? 'assertive' : 'polite'}
-                          >
-                            <span aria-hidden="true" className="font-black">{refereeNotifications[match.id].type === 'error' ? '!' : '✓'}</span>
-                            <span>{refereeNotifications[match.id].message}</span>
-                          </p>
-                        )}
-                        <p className="mt-2 text-[11px] text-slate-500">Wprowadź unikalną nazwę użytkownika konta z rolą „Sędzia”.</p>
-                      </div>
-                      {match.player1Id && match.player2Id ? (
-                        <MatchResultControls
-                          key={`${match.id}-${match.revision}`}
-                          match={match}
-                          format={tournament.format}
-                          onSave={saveMatchResult}
-                          saving={savingResultMatchId === match.id}
-                        />
-                      ) : (
-                        <p className="mt-3 text-xs text-slate-500">Wynik będzie dostępny po przypisaniu obu uczestników.</p>
-                      )}
-                      {match.winnerId && <p className="mt-3 text-xs font-semibold text-emerald-200">Zwycięzca: {participantById.get(match.winnerId) || 'uczestnik'}</p>}
-                    </article>
-                  ))}
+                    ))}
+                  </dl>
+                </section>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'participants' && (
+            <section>
+              <SectionHeading
+                eyebrow="Rejestr zgłoszeń"
+                title="Uczestnicy"
+                count={participants.length}
+                action={<p className="text-sm text-muted">Limit miejsc: {tournament.maxParticipants}</p>}
+              />
+              {participants.length ? (
+                <div className="card overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="table min-w-[600px]">
+                      <thead><tr><th scope="col">Uczestnik</th><th scope="col">Zgłoszono</th><th scope="col" className="!text-right">Akcja</th></tr></thead>
+                      <tbody>
+                        {participants.map((participant) => (
+                          <tr key={participant.id}>
+                            <td>
+                              <div className="flex items-center gap-3">
+                                <Avatar name={participant.user.name} />
+                                <div>
+                                  <p className="font-semibold text-ink">{participant.user.name}</p>
+                                  <p className="mt-0.5 text-sm text-muted">{participant.user.email}</p>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="mono text-sm text-muted">{formatDateTime(participant.joinedAt)}</td>
+                            <td className="text-right">
+                              <button type="button" disabled={Boolean(removingId)} onClick={() => removeParticipant(participant)} className="btn btn-danger btn-sm">
+                                {removingId === participant.userId ? 'Usuwanie…' : 'Wypisz'}
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               ) : (
-                <div className="rounded-2xl border border-dashed border-white/10 p-10 text-center">
-                  <p className="font-bold">Harmonogram jest pusty</p>
-                  <p className="mt-2 text-sm text-slate-500">Dodaj pierwszy mecz, wybierając uczestników wydarzenia.</p>
+                <div className="empty">
+                  <span className="empty-icon"><Icon name="users" size={26} /></span>
+                  <h3 className="h-card">Brak zgłoszeń</h3>
+                  <p className="max-w-md text-[0.9375rem] text-muted">Uczestnicy pojawią się tutaj po zapisaniu się na wydarzenie. Udostępnij im stronę zapisów.</p>
+                  <Link to={`/tournaments/${id}`} className="btn btn-ghost mt-4">Otwórz stronę zapisów <Arrow /></Link>
                 </div>
               )}
             </section>
-          </div>
-        )}
+          )}
 
-        {activeTab === 'settings' && (
-          <div className="grid gap-5 xl:grid-cols-[1fr_320px]">
-            <form onSubmit={saveSettings} className="rounded-3xl border border-white/[0.08] bg-[#111827]/80 p-5 sm:p-7">
-              <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#81C7FF]">Konfiguracja wydarzenia</p><h2 className="mt-1 text-xl font-bold">Ustawienia podstawowe</h2>
-              <div className="mt-6 grid gap-5 sm:grid-cols-2">
-                <div className="sm:col-span-2"><Field label="Nazwa wydarzenia"><input required maxLength="120" value={form.title} onChange={(event) => updateForm('title', event.target.value)} className={INPUT_CLASS} /></Field></div>
-                <div className="sm:col-span-2"><Field label="Opis"><textarea rows="4" maxLength="3000" value={form.description} onChange={(event) => updateForm('description', event.target.value)} className={`${INPUT_CLASS} py-3`} /></Field></div>
-                <Field label="Termin rozpoczęcia"><input required type="datetime-local" value={form.date} onChange={(event) => updateForm('date', event.target.value)} className={INPUT_CLASS} /></Field>
-                <Field label="Dyscyplina"><select value={form.sportType} onChange={(event) => updateForm('sportType', event.target.value)} className={INPUT_CLASS}>{SPORTS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
-                <Field label="Limit uczestników"><input required type="number" min={Math.max(1, participants.length)} max="10000" value={form.maxParticipants} onChange={(event) => updateForm('maxParticipants', event.target.value)} className={INPUT_CLASS} hint={`Obecnie zapisanych: ${participants.length}`} /></Field>
-                <Field label="Status wydarzenia"><select value={form.status} onChange={(event) => updateForm('status', event.target.value)} className={INPUT_CLASS}>{(STATUS_TRANSITIONS[tournament.status] || [tournament.status]).map((status) => <option key={status} value={status}>{STATUS_LABELS[status]}</option>)}</select></Field>
+          {activeTab === 'matches' && (
+            <div className="grid gap-8 xl:grid-cols-[0.75fr_1.25fr] xl:items-start">
+              <div className="grid gap-5">
+                <section className={`card card-pad ${matches.length === 0 ? '!border-ink' : ''}`}>
+                  <p className="eyebrow mb-3">Szybki start</p>
+                  <h2 className="h-card">Automatyczny harmonogram</h2>
+                  <p className="mt-2 text-sm leading-relaxed text-muted">
+                    {FORMAT_LABELS[tournament.format] || tournament.format || 'Wybierz format wydarzenia'} · {participants.length} zapisanych uczestników.
+                    {tournament.format === 'ROUND_ROBIN' && ' Każdy zagra z każdym.'}
+                    {tournament.format === 'SINGLE_ELIMINATION' && ' Zwycięzcy awansują dalej, wolne losy zostaną obsłużone automatycznie.'}
+                    {tournament.format === 'DOUBLE_ELIMINATION' && ' Drabinka zwycięzców i przegranych zakończy się finałem.'}
+                    {tournament.format === 'GROUP_STAGE' && ' Uczestnicy zostaną podzieleni na grupy, a mecze w każdej grupie ułożone w rundy.'}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={generateSchedule}
+                    disabled={scheduleGenerating
+                      || matches.length > 0
+                      || participants.length < 2
+                      || !FORMAT_LABELS[tournament.format]
+                      || doubleEliminationBlocked}
+                    className="btn btn-primary btn-block mt-5"
+                  >
+                    <Icon name="bracket" size={18} />
+                    {scheduleGenerating ? 'Generowanie…' : 'Utwórz harmonogram automatycznie'}
+                  </button>
+                  {scheduleNotice && (
+                    <Notice tone={scheduleNotice.type === 'error' ? 'danger' : 'ok'} className="mt-4 !text-sm" onClose={() => setScheduleNotice(null)}>
+                      {scheduleNotice.message}
+                    </Notice>
+                  )}
+                  <div className="mt-3 grid gap-1.5 text-[0.8125rem] leading-snug">
+                    {matches.length > 0 && <p className="flex gap-2 text-muted"><Icon name="info" size={15} className="mt-0.5 shrink-0" />Harmonogram już istnieje. Automatyczne generowanie nie nadpisuje rozegranych ani zaplanowanych meczów.</p>}
+                    {participants.length < 2 && <p className="flex gap-2 font-semibold text-warn"><Icon name="alert" size={15} className="mt-0.5 shrink-0" />Zapisz co najmniej dwóch uczestników, aby wygenerować mecze.</p>}
+                    {tournament.format === 'DOUBLE_ELIMINATION' && participants.length >= 4 && doubleEliminationBlocked && <p className="flex gap-2 font-semibold text-warn"><Icon name="alert" size={15} className="mt-0.5 shrink-0" />Pełna drabinka podwójnej eliminacji wymaga liczby uczestników będącej potęgą dwójki.</p>}
+                    {tournament.format === 'GROUP_STAGE' && <p className="flex gap-2 text-muted"><Icon name="info" size={15} className="mt-0.5 shrink-0" />Po zakończeniu fazy grupowej dodaj mecze play-off ręcznie.</p>}
+                  </div>
+                </section>
+
+                <details className="group card">
+                  <summary className="flex min-h-[64px] cursor-pointer list-none items-center justify-between gap-3 px-5 sm:px-7 [&::-webkit-details-marker]:hidden">
+                    <span className="flex items-center gap-3">
+                      <Icon name="plus" size={19} />
+                      <span className="h-card">Dodaj mecz ręcznie</span>
+                    </span>
+                    <Icon name="chevron-down" size={18} className="text-muted transition-transform duration-300 group-open:rotate-180" />
+                  </summary>
+                  <form onSubmit={createMatch} className="grid gap-4 border-t border-line p-5 sm:p-7">
+                    <Field label="Uczestnik A"><select required value={matchForm.player1Id} onChange={(event) => setMatchForm((current) => ({ ...current, player1Id: event.target.value }))} className="input"><option value="">Wybierz uczestnika</option>{participants.map(({ user: participant }) => <option key={participant.id} value={participant.id}>{participant.name}</option>)}</select></Field>
+                    <Field label="Uczestnik B"><select required value={matchForm.player2Id} onChange={(event) => setMatchForm((current) => ({ ...current, player2Id: event.target.value }))} className="input"><option value="">Wybierz uczestnika</option>{participants.filter(({ user: participant }) => participant.id !== matchForm.player1Id).map(({ user: participant }) => <option key={participant.id} value={participant.id}>{participant.name}</option>)}</select></Field>
+                    <div className="grid grid-cols-2 gap-3">
+                      <Field label="Runda"><input required min="1" max="64" type="number" value={matchForm.round} onChange={(event) => setMatchForm((current) => ({ ...current, round: event.target.value }))} className="input" /></Field>
+                      <Field label="Boisko / stół"><input maxLength="80" value={matchForm.court} onChange={(event) => setMatchForm((current) => ({ ...current, court: event.target.value }))} placeholder="np. Boisko A" className="input" /></Field>
+                    </div>
+                    <Field label="Termin meczu"><input type="datetime-local" value={matchForm.scheduledAt} onChange={(event) => setMatchForm((current) => ({ ...current, scheduledAt: event.target.value }))} className="input" /></Field>
+                    {['ROUND_ROBIN', 'GROUP_STAGE'].includes(tournament.format) && <Field label="Grupa"><input maxLength="80" value={matchForm.groupKey} onChange={(event) => setMatchForm((current) => ({ ...current, groupKey: event.target.value }))} placeholder="np. Grupa A" className="input" /></Field>}
+                    <button type="submit" disabled={matchSaving || participants.length < 2} className="btn btn-solid btn-block">
+                      <Icon name="plus" size={18} /> {matchSaving ? 'Dodawanie…' : 'Dodaj do harmonogramu'}
+                    </button>
+                    {participants.length < 2 && <p className="text-[0.8125rem] font-semibold text-warn">Do utworzenia meczu potrzebujesz co najmniej dwóch zgłoszonych uczestników.</p>}
+                  </form>
+                </details>
               </div>
-              <div className="mt-7 flex flex-wrap justify-end gap-3 border-t border-white/[0.06] pt-5"><button type="button" onClick={() => setForm({ title: tournament.title || '', description: tournament.description || '', date: toDateInput(tournament.date), sportType: tournament.sportType, maxParticipants: String(tournament.maxParticipants), status: tournament.status })} className="rounded-xl border border-white/10 px-4 py-3 text-xs font-bold text-slate-300 hover:bg-white/[0.04]">Odrzuć zmiany</button><button type="submit" disabled={saving} className="organizer-primary-button rounded-xl px-5 py-3 text-xs font-bold text-white disabled:opacity-50">{saving ? 'Zapisywanie…' : 'Zapisz ustawienia'}</button></div>
-            </form>
-            <aside className="h-fit rounded-3xl border border-rose-300/15 bg-rose-300/[0.03] p-5">
-              <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-rose-200">Strefa niebezpieczna</p><h2 className="mt-2 text-lg font-bold text-white">Usuń wydarzenie</h2><p className="mt-2 text-xs leading-5 text-slate-400">Usunięcie jest trwałe. Skasowane zostaną także zgłoszenia, harmonogram, wyniki i historia meczów.</p><button type="button" onClick={deleteEvent} className="mt-5 min-h-11 w-full rounded-xl border border-rose-300/20 px-4 text-xs font-bold text-rose-200 transition hover:bg-rose-300/10">Usuń wydarzenie</button>
-            </aside>
-          </div>
-        )}
+
+              <section>
+                <SectionHeading eyebrow="Obsada i wyniki" title="Mecze" count={matches.length} />
+                {matches.length ? (
+                  <div className="grid gap-4">
+                    {matches.map((match) => {
+                      const live = match.status === 'IN_PROGRESS';
+                      const showScore = live || match.status === 'FINISHED';
+                      const refereeNote = refereeNotifications[match.id];
+                      return (
+                        <article key={match.id} className={`card overflow-hidden ${live ? '!border-live/50' : ''}`}>
+                          <div className="p-4 sm:p-5">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="chip" data-tone={MATCH_STATUS[match.status]?.tone}>
+                                  {live && <span className="live-dot" aria-hidden="true" />}
+                                  {MATCH_STATUS[match.status]?.label || match.status}
+                                </span>
+                                <span className="mono text-xs text-muted">
+                                  Runda {match.round}{match.groupKey ? ` · ${match.groupKey}` : ''}
+                                </span>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                <Link to={`/tournaments/${tournament.id}/matches/${match.id}/live`} className={`btn btn-sm ${live ? 'btn-primary' : 'btn-ghost'}`}>
+                                  {live ? 'Oglądaj na żywo' : 'Śledź wynik'}
+                                </Link>
+                                {match.status === 'SCHEDULED' && (
+                                  <button
+                                    type="button"
+                                    disabled={deletingMatchId === match.id}
+                                    onClick={() => { void deleteScheduledMatch(match); }}
+                                    className="btn btn-danger btn-sm"
+                                    aria-label="Usuń mecz"
+                                    title="Usuń mecz"
+                                  >
+                                    <Icon name="trash" size={16} />
+                                    {deletingMatchId === match.id ? 'Usuwanie…' : <span className="sr-only sm:not-sr-only">Usuń</span>}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                            <p className="mt-4 flex flex-wrap items-baseline gap-x-3 gap-y-1 font-display text-2xl font-bold uppercase leading-tight text-ink">
+                              <span className="min-w-0 break-words">{match.player1?.name || 'Oczekuje na awans'}</span>
+                              <span className="num text-3xl">{showScore ? `${match.score1 ?? 0}:${match.score2 ?? 0}` : <span className="text-lg text-muted">vs</span>}</span>
+                              <span className="min-w-0 break-words">{match.player2?.name || 'Oczekuje na awans'}</span>
+                            </p>
+                            {match.winnerId && (
+                              <p className="mt-2 flex items-center gap-2 text-sm font-semibold text-ink"><Icon name="trophy" size={16} />Zwycięzca: {participantById.get(match.winnerId) || 'uczestnik'}</p>
+                            )}
+                          </div>
+
+                          <Fold
+                            icon="calendar"
+                            title="Termin i boisko"
+                            summary={[match.scheduledAt ? formatDateTime(match.scheduledAt) : null, match.court].filter(Boolean).join(' · ') || 'Nie ustalono'}
+                          >
+                            <MatchDetailsEditor
+                              key={`${match.id}-${match.player1Id || ''}-${match.player2Id || ''}-${match.round}-${match.groupKey || ''}-${match.court || ''}-${match.scheduledAt || ''}`}
+                              match={match}
+                              participants={participants}
+                              onSave={saveMatchDetails}
+                              saving={savingDetailsMatchId === match.id}
+                            />
+                          </Fold>
+
+                          <Fold
+                            icon="whistle"
+                            title="Sędzia"
+                            summary={match.assignedReferee ? `${match.assignedReferee.name} · @${match.assignedReferee.username}` : 'Nie przydzielono'}
+                            tone={!match.assignedReferee && match.status === 'SCHEDULED' ? 'warn' : undefined}
+                          >
+                            {match.assignedReferee && (
+                              <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-[12px] border border-line bg-bg p-3">
+                                <p className="text-sm font-semibold text-ink">{match.assignedReferee.name} <span className="mono font-normal text-muted">@{match.assignedReferee.username}</span></p>
+                                <div className="flex flex-wrap gap-2">
+                                  <Link to={`/referee/${match.id}`} className="btn btn-ghost btn-sm">Panel sędziego <Icon name="arrow-up-right" size={16} /></Link>
+                                  <button type="button" disabled={savingRefereeMatchId === match.id} onClick={() => unassignReferee(match)} className="btn btn-danger btn-sm">
+                                    {savingRefereeMatchId === match.id ? 'Zapisywanie…' : 'Usuń sędziego'}
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                            <form onSubmit={(event) => { event.preventDefault(); void assignReferee(match); }} className="flex flex-col gap-2 sm:flex-row">
+                              <label className="sr-only" htmlFor={`referee-username-${match.id}`}>Nazwa użytkownika sędziego</label>
+                              <input
+                                id={`referee-username-${match.id}`}
+                                type="text"
+                                required
+                                minLength="3"
+                                maxLength="24"
+                                pattern="[A-Za-z0-9_]{3,24}"
+                                autoComplete="off"
+                                placeholder="Nazwa użytkownika sędziego"
+                                value={refereeUsernames[match.id] ?? match.assignedReferee?.username ?? ''}
+                                onChange={(event) => {
+                                  setRefereeUsernames((current) => ({ ...current, [match.id]: event.target.value }));
+                                  setRefereeNotifications((current) => ({ ...current, [match.id]: null }));
+                                }}
+                                className="input input-sm min-w-0 flex-1"
+                              />
+                              <button type="submit" disabled={savingRefereeMatchId === match.id} className="btn btn-solid btn-sm">
+                                {savingRefereeMatchId === match.id ? 'Zapisywanie…' : match.assignedReferee ? 'Zmień sędziego' : 'Przydziel sędziego'}
+                              </button>
+                            </form>
+                            {refereeNote && (
+                              <p
+                                className={`mt-2 flex items-start gap-2 text-sm font-semibold ${refereeNote.type === 'error' ? 'text-danger' : 'text-ok'}`}
+                                role={refereeNote.type === 'error' ? 'alert' : 'status'}
+                                aria-live={refereeNote.type === 'error' ? 'assertive' : 'polite'}
+                              >
+                                <Icon name={refereeNote.type === 'error' ? 'alert' : 'check'} size={16} className="mt-0.5 shrink-0" />
+                                <span>{refereeNote.message}</span>
+                              </p>
+                            )}
+                            <p className="hint">Wpisz nazwę użytkownika konta z rolą „Sędzia” — znajdzie mecz w swoim panelu.</p>
+                          </Fold>
+
+                          <Fold
+                            icon="edit"
+                            title="Wynik"
+                            summary={playable(match) ? (match.status === 'FINISHED' ? 'Zatwierdzony' : 'Wpisz ręcznie') : 'Czeka na uczestników'}
+                          >
+                            {playable(match) ? (
+                              <MatchResultControls
+                                key={`${match.id}-${match.revision}`}
+                                match={match}
+                                format={tournament.format}
+                                onSave={saveMatchResult}
+                                saving={savingResultMatchId === match.id}
+                              />
+                            ) : (
+                              <p className="text-sm text-muted">Wynik będzie dostępny po przypisaniu obu uczestników.</p>
+                            )}
+                          </Fold>
+                        </article>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="empty">
+                    <span className="empty-icon"><Icon name="bracket" size={26} /></span>
+                    <h3 className="h-card">Harmonogram jest pusty</h3>
+                    <p className="max-w-md text-[0.9375rem] text-muted">
+                      {participants.length >= 2
+                        ? 'Użyj przycisku „Utwórz harmonogram automatycznie” albo dodaj pierwszy mecz ręcznie.'
+                        : 'Gdy zapiszą się co najmniej dwie osoby, utworzysz tu mecze jednym kliknięciem.'}
+                    </p>
+                  </div>
+                )}
+              </section>
+            </div>
+          )}
+
+          {activeTab === 'settings' && (
+            <div className="grid gap-6 xl:grid-cols-[1fr_340px] xl:items-start">
+              <form onSubmit={saveSettings} className="card card-pad">
+                <p className="eyebrow mb-3">Konfiguracja wydarzenia</p>
+                <h2 className="h-section">Ustawienia podstawowe</h2>
+                <div className="mt-6 grid gap-5 sm:grid-cols-2">
+                  <div className="sm:col-span-2"><Field label="Nazwa wydarzenia"><input required maxLength="120" value={form.title} onChange={(event) => updateForm('title', event.target.value)} className="input" /></Field></div>
+                  <div className="sm:col-span-2"><Field label="Opis"><textarea rows="4" maxLength="3000" value={form.description} onChange={(event) => updateForm('description', event.target.value)} className="input" /></Field></div>
+                  <Field label="Termin rozpoczęcia"><input required type="datetime-local" value={form.date} onChange={(event) => updateForm('date', event.target.value)} className="input" /></Field>
+                  <Field label="Dyscyplina"><select value={form.sportType} onChange={(event) => updateForm('sportType', event.target.value)} className="input">{SPORTS.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}</select></Field>
+                  <Field label="Limit uczestników" hint={`Obecnie zapisanych: ${participants.length}`}><input required type="number" min={Math.max(1, participants.length)} max="10000" value={form.maxParticipants} onChange={(event) => updateForm('maxParticipants', event.target.value)} className="input" /></Field>
+                  <Field label="Status wydarzenia"><select value={form.status} onChange={(event) => updateForm('status', event.target.value)} className="input">{(STATUS_TRANSITIONS[tournament.status] || [tournament.status]).map((status) => <option key={status} value={status}>{STATUS_LABELS[status]}</option>)}</select></Field>
+                </div>
+                <div className="mt-7 flex flex-col-reverse gap-3 border-t border-line pt-5 sm:flex-row sm:justify-end">
+                  <button type="button" onClick={() => setForm({ title: tournament.title || '', description: tournament.description || '', date: toDateInput(tournament.date), sportType: tournament.sportType, maxParticipants: String(tournament.maxParticipants), status: tournament.status })} className="btn btn-ghost">Odrzuć zmiany</button>
+                  <button type="submit" disabled={saving} className="btn btn-primary"><Icon name="save" size={18} /> {saving ? 'Zapisywanie…' : 'Zapisz ustawienia'}</button>
+                </div>
+              </form>
+              <aside className="rounded-card border-[1.5px] border-danger/40 bg-danger/[0.04] p-5 sm:p-6">
+                <p className="mono text-[0.6875rem] font-semibold uppercase tracking-[0.14em] text-danger">Strefa niebezpieczna</p>
+                <h2 className="h-card mt-2">Usuń wydarzenie</h2>
+                <p className="mt-2 text-sm leading-relaxed text-muted">Usunięcie jest trwałe. Skasowane zostaną także zgłoszenia, harmonogram, wyniki i historia meczów.</p>
+                <button type="button" onClick={deleteEvent} className="btn btn-danger btn-block mt-5"><Icon name="trash" size={18} /> Usuń wydarzenie</button>
+              </aside>
+            </div>
+          )}
+        </TabPanel>
       </div>
     </main>
   );

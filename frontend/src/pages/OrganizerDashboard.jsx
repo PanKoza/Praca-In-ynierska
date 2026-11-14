@@ -2,62 +2,16 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
+import { FORMAT_LABELS, SPORT_LABELS, TOURNAMENT_STATUS_LABELS, capacity, formatDate, formatTime, plural, sportIcon } from '../lib/labels';
+import Icon from '../components/Icon';
+import { useConfirm } from '../components/Modal';
+import Reveal from '../components/Reveal';
+import { useTour } from '../components/Tour';
+import { EventPass, Panel, PanelStats, PassAdd, PassRail, StackBar } from '../components/Dashboard';
+import CountUp from '../components/reactbits/CountUp';
+import { Arrow, Avatar, EmptyState, Meter, Notice, PageHeader, SportBadge, StatusChip, TabPanel, Tabs } from '../components/ui';
 
-const TABS = [
-  { id: 'overview', label: 'Przegląd', icon: '◈' },
-  { id: 'events', label: 'Wydarzenia', icon: '▦' },
-  { id: 'live', label: 'Mecze na żywo', icon: '◉' },
-  { id: 'participants', label: 'Uczestnicy', icon: '◎' },
-];
-
-const STATUS_LABELS = {
-  DRAFT: 'Wersja robocza',
-  OPEN: 'Zapisy otwarte',
-  PUBLISHED: 'Opublikowany',
-  IN_PROGRESS: 'W trakcie',
-  FINISHED: 'Zakończony',
-  CANCELLED: 'Anulowany',
-};
-
-const STATUS_STYLES = {
-  DRAFT: 'border-white/10 bg-white/[0.05] text-slate-300',
-  OPEN: 'border-cyan-300/20 bg-cyan-300/10 text-cyan-200',
-  PUBLISHED: 'border-blue-300/20 bg-blue-300/10 text-blue-200',
-  IN_PROGRESS: 'border-emerald-300/20 bg-emerald-300/10 text-emerald-200',
-  FINISHED: 'border-violet-300/20 bg-violet-300/10 text-violet-200',
-  CANCELLED: 'border-rose-300/20 bg-rose-300/10 text-rose-200',
-};
-
-const SPORT_LABELS = {
-  BEACH_VOLLEYBALL: 'Siatkówka plażowa',
-  FOOTBALL_6V6: 'Piłka nożna 6v6',
-  SOCCER: 'Piłka nożna',
-  BASKETBALL: 'Koszykówka',
-  VOLLEYBALL: 'Siatkówka',
-  TENNIS: 'Tenis',
-  ESPORTS: 'E-sport',
-  CUSTOM: 'Własna dyscyplina',
-  OTHER: 'Inne',
-};
-
-const SPORT_ICONS = {
-  BEACH_VOLLEYBALL: '🏐',
-  FOOTBALL_6V6: '⚽',
-  SOCCER: '⚽',
-  BASKETBALL: '🏀',
-  VOLLEYBALL: '🏐',
-  TENNIS: '🎾',
-  ESPORTS: '🎮',
-  CUSTOM: '🏆',
-  OTHER: '🏆',
-};
-
-const FORMAT_LABELS = {
-  SINGLE_ELIMINATION: 'Pojedyncza eliminacja',
-  DOUBLE_ELIMINATION: 'Podwójna eliminacja',
-  ROUND_ROBIN: 'Każdy z każdym',
-  GROUP_STAGE: 'Grupy i play-offy',
-};
+const STATUS_LABELS = TOURNAMENT_STATUS_LABELS;
 
 const DEFAULT_STATS = {
   tournaments: 0,
@@ -68,16 +22,16 @@ const DEFAULT_STATS = {
   statuses: {},
 };
 
-function dateLabel(value, options = { day: 'numeric', month: 'short', year: 'numeric' }) {
-  if (!value) return 'Data nieustalona';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? 'Data nieustalona' : date.toLocaleDateString('pl-PL', options);
-}
+const TOUR = [
+  { target: '[data-tour="org-new"]', title: 'Tu zaczyna się każde wydarzenie', body: 'Kreator w czterech krokach zapyta o termin, format i zasady. Szkic zapisuje się sam, więc możesz przerwać w dowolnym momencie.' },
+  { target: '[data-tour="org-next"]', title: 'Podpowiadamy następny krok', body: 'Ten baner zawsze mówi, co warto zrobić teraz — np. wygenerować harmonogram albo zajrzeć do meczów na żywo.' },
+  { target: '[data-tour="org-tabs"]', title: 'Cztery widoki panelu', body: 'Przegląd, lista wydarzeń, mecze na żywo i zgłoszenia uczestników. Przełączasz je jednym kliknięciem.' },
+  { target: '[data-tour="org-stats"]', title: 'Stan na teraz', body: 'Liczba zgłoszeń i postęp meczów ze wszystkich Twoich wydarzeń. Odświeżają się automatycznie co minutę.' },
+  { target: '[data-tour="org-passes"]', title: 'Twoje wydarzenia jak karty w portfelu', body: 'Każda karta to jedno wydarzenie. Przewiń je w bok i kliknij, aby przejść do zarządzania.' },
+];
 
-function timeLabel(value) {
-  if (!value) return '';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? '' : date.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' });
+function dateLabel(value, options = { day: 'numeric', month: 'short', year: 'numeric' }) {
+  return formatDate(value, options, 'Data nieustalona');
 }
 
 function statusOptions(status) {
@@ -89,161 +43,173 @@ function statusOptions(status) {
   return [status];
 }
 
-function participantPercentage(tournament) {
-  if (!tournament.maxParticipants) return 0;
-  return Math.min(100, Math.round((tournament.participants.length / tournament.maxParticipants) * 100));
-}
-
-function StatCard({ label, value, detail, icon, accent, delay = 0 }) {
-  return (
-    <article className="organizer-stat organizer-reveal relative overflow-hidden rounded-3xl border border-white/[0.08] bg-[#111827]/85 p-5 sm:p-6" style={{ '--reveal-delay': `${delay}ms` }}>
-      <div className={`absolute -right-8 -top-8 h-28 w-28 rounded-full blur-3xl ${accent}`} />
-      <div className="relative flex items-start justify-between gap-3">
-        <div>
-          <p className="text-sm font-medium text-slate-400">{label}</p>
-          <p className="mt-3 text-4xl font-black tracking-[-0.06em] text-white tabular-nums">{value}</p>
-          <p className="mt-2 text-xs text-slate-500">{detail}</p>
-        </div>
-        <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl border border-white/10 bg-white/[0.04] text-lg text-white">{icon}</span>
-      </div>
-    </article>
-  );
-}
-
-function StatusPill({ status }) {
-  return (
-    <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-bold ${STATUS_STYLES[status] || STATUS_STYLES.DRAFT}`}>
-      {status === 'IN_PROGRESS' && <span className="relative flex h-2 w-2"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-300 opacity-50" /><span className="relative h-2 w-2 rounded-full bg-emerald-300" /></span>}
-      {STATUS_LABELS[status] || status}
-    </span>
-  );
-}
-
-function EmptyState({ title, detail, action }) {
-  return (
-    <div className="rounded-3xl border border-dashed border-white/10 bg-white/[0.02] px-6 py-14 text-center">
-      <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-[#0F62FE]/20 to-[#8A3FFC]/20 text-2xl">✦</div>
-      <h3 className="mt-4 text-lg font-bold text-white">{title}</h3>
-      <p className="mx-auto mt-2 max-w-md text-sm text-slate-400">{detail}</p>
-      {action}
-    </div>
-  );
+/* Works out the single most useful thing the organizer can do right now. */
+function nextStep(tournaments, liveMatches) {
+  const active = tournaments.filter((tournament) => !['FINISHED', 'CANCELLED'].includes(tournament.status));
+  if (liveMatches.length) {
+    return {
+      icon: 'bolt',
+      title: `${liveMatches.length} ${plural(liveMatches.length, 'mecz trwa', 'mecze trwają', 'meczów trwa')} właśnie teraz`,
+      body: 'Zajrzyj do meczów na żywo, aby śledzić wyniki wprowadzane przez sędziów.',
+      tab: 'live',
+      label: 'Pokaż mecze na żywo',
+    };
+  }
+  const needsSchedule = active.find((tournament) => tournament.participants.length >= 2 && tournament.matches.length === 0);
+  if (needsSchedule) {
+    return {
+      icon: 'bracket',
+      title: `Wygeneruj harmonogram: ${needsSchedule.title}`,
+      body: `Masz już ${needsSchedule.participants.length} zgłoszeń. Jedno kliknięcie utworzy wszystkie mecze.`,
+      to: `/organizer/events/${needsSchedule.id}`,
+      state: { tab: 'matches' },
+      label: 'Przejdź do harmonogramu',
+    };
+  }
+  const needsReferee = active.find((tournament) => tournament.matches.some((match) => match.status === 'SCHEDULED' && !match.assignedRefereeId && !match.refereeTokenHash && match.player1Id && match.player2Id));
+  if (needsReferee) {
+    return {
+      icon: 'whistle',
+      title: `Przydziel sędziów: ${needsReferee.title}`,
+      body: 'Część zaplanowanych meczów nie ma jeszcze sędziego. Wystarczy wpisać jego nazwę użytkownika.',
+      to: `/organizer/events/${needsReferee.id}`,
+      state: { tab: 'matches' },
+      label: 'Przydziel sędziów',
+    };
+  }
+  const waiting = active.find((tournament) => tournament.participants.length < 2);
+  if (waiting) {
+    return {
+      icon: 'users',
+      title: `Zbierz zgłoszenia: ${waiting.title}`,
+      body: 'Do utworzenia harmonogramu potrzebujesz co najmniej dwóch uczestników. Udostępnij im stronę wydarzenia.',
+      to: `/tournaments/${waiting.id}`,
+      label: 'Otwórz stronę wydarzenia',
+    };
+  }
+  return null;
 }
 
 function TournamentCard({ tournament, onStatusChange, onDelete, saving, deleting }) {
   const [nextStatus, setNextStatus] = useState(tournament.status);
-  const percentage = participantPercentage(tournament);
+  const seats = capacity(tournament.participants.length, tournament.maxParticipants);
   const options = statusOptions(tournament.status);
+  const live = tournament.matches.filter((match) => match.status === 'IN_PROGRESS').length;
+  const finished = tournament.matches.filter((match) => match.status === 'FINISHED').length;
 
   return (
-    <article className="organizer-event-card organizer-reveal overflow-hidden rounded-3xl border border-white/[0.08] bg-[#111827]/85">
-      <div className="h-1 bg-gradient-to-r from-[#0F62FE] via-[#39B4FE] to-[#8A3FFC]" />
-      <div className="p-5 sm:p-6">
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-          <div className="flex min-w-0 gap-4">
-            <div className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl border border-white/10 bg-gradient-to-br from-[#0F62FE]/15 to-[#8A3FFC]/20 text-2xl shadow-[0_8px_32px_rgba(15,98,254,0.1)]">
-              {SPORT_ICONS[tournament.sportType] || '🏆'}
+    <article className="panel overflow-hidden">
+      <div className="grid gap-5 p-5 sm:p-6 lg:grid-cols-[1fr_auto] lg:items-start">
+        <div className="flex min-w-0 gap-4">
+          <SportBadge sport={tournament.sportType} className="!h-14 !w-14" size={26} />
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+              <h3 className="h-card break-words">{tournament.title}</h3>
+              <StatusChip status={tournament.status} />
             </div>
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <h3 className="truncate text-lg font-bold text-white sm:text-xl">{tournament.title}</h3>
-                <StatusPill status={tournament.status} />
-              </div>
-              <p className="mt-1 text-sm text-slate-400">
-                {SPORT_LABELS[tournament.sportType] || tournament.sportType}
-                {tournament.format && ` · ${FORMAT_LABELS[tournament.format] || tournament.format}`}
-                {tournament.location && ` · ${tournament.location}`}
-              </p>
-              <p className="mt-3 text-xs text-slate-500">
-                {dateLabel(tournament.date)}{tournament.endDate && ` — ${dateLabel(tournament.endDate)}`}
-                {tournament.organizer?.name && ` · Organizator: ${tournament.organizer.name}`}
-              </p>
-            </div>
+            <p className="mt-2 text-sm text-muted">
+              {SPORT_LABELS[tournament.sportType] || tournament.sportType}
+              {tournament.format && ` · ${FORMAT_LABELS[tournament.format] || tournament.format}`}
+              {tournament.location && ` · ${tournament.location}`}
+            </p>
+            <p className="mono mt-2 text-xs text-muted">
+              {dateLabel(tournament.date)}{tournament.endDate && ` — ${dateLabel(tournament.endDate)}`}
+              {tournament.organizer?.name && ` · Organizator: ${tournament.organizer.name}`}
+            </p>
           </div>
+        </div>
+        <Link to={`/organizer/events/${tournament.id}`} className="btn btn-solid rounded-full">
+          Zarządzaj <Arrow />
+        </Link>
+      </div>
 
-          <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-            <Link to={`/organizer/events/${tournament.id}`} className="rounded-xl border border-white/10 px-3 py-2.5 text-xs font-semibold text-slate-200 transition hover:border-[#39B4FE]/40 hover:bg-white/[0.04]">
-              Zarządzaj <span aria-hidden="true">↗</span>
-            </Link>
-            <button
-              type="button"
-              disabled={saving || deleting}
-              onClick={() => onDelete(tournament)}
-              className="rounded-xl border border-rose-300/20 px-3 py-2.5 text-xs font-semibold text-rose-200 transition hover:border-rose-300/50 hover:bg-rose-300/10 disabled:cursor-not-allowed disabled:opacity-50"
-              aria-label={`Usuń wydarzenie ${tournament.title}`}
-            >
-              {deleting ? 'Usuwanie…' : 'Usuń'}
-            </button>
-            {options.length > 1 && (
-              <div className="flex gap-2">
-                <label className="sr-only" htmlFor={`status-${tournament.id}`}>Zmień status {tournament.title}</label>
-                <select id={`status-${tournament.id}`} value={nextStatus} onChange={(event) => setNextStatus(event.target.value)} className="max-w-40 rounded-xl border border-white/10 bg-[#090D16] px-3 py-2.5 text-xs text-slate-200 focus:border-[#0F62FE] focus:outline-none">
-                  {options.map((status) => <option key={status} value={status}>{STATUS_LABELS[status]}</option>)}
-                </select>
-                <button type="button" disabled={saving || nextStatus === tournament.status} onClick={() => onStatusChange(tournament.id, nextStatus)} className="rounded-xl bg-gradient-to-r from-[#0F62FE] to-[#8A3FFC] px-3 py-2.5 text-xs font-bold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40">
-                  {saving ? 'Zapis…' : 'Zapisz'}
-                </button>
-              </div>
+      <div className="grid gap-5 border-t border-line px-5 py-5 sm:grid-cols-[1fr_auto] sm:items-center sm:px-6">
+        <div>
+          <div className="mb-2 flex items-baseline justify-between gap-3 text-sm">
+            <span className="font-semibold text-ink">Zgłoszenia</span>
+            <span className="mono text-muted"><span className="font-semibold text-ink">{seats.taken}</span> / {seats.limit}</span>
+          </div>
+          <Meter value={seats.percent} label={`Zajęte ${seats.percent}% miejsc`} />
+          <p className="mt-2 text-xs text-muted">{seats.free} {plural(seats.free, 'wolne miejsce', 'wolne miejsca', 'wolnych miejsc')}</p>
+        </div>
+        <dl className="flex gap-6">
+          <div><dd className="num text-3xl">{tournament.matches.length}</dd><dt className="mt-1 text-xs text-muted">mecze</dt></div>
+          <div><dd className={`num text-3xl ${live ? '!text-live' : ''}`}>{live}</dd><dt className="mt-1 text-xs text-muted">na żywo</dt></div>
+          <div><dd className="num text-3xl">{finished}</dd><dt className="mt-1 text-xs text-muted">zakończone</dt></div>
+        </dl>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line bg-bg px-5 py-3 sm:px-6">
+        {options.length > 1 ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="text-sm font-semibold text-ink" htmlFor={`status-${tournament.id}`}>Status:</label>
+            <select id={`status-${tournament.id}`} value={nextStatus} onChange={(event) => setNextStatus(event.target.value)} className="input input-sm !w-auto">
+              {options.map((status) => <option key={status} value={status}>{STATUS_LABELS[status]}</option>)}
+            </select>
+            {nextStatus !== tournament.status && (
+              <button type="button" disabled={saving} onClick={() => onStatusChange(tournament.id, nextStatus)} className="btn btn-primary btn-sm">
+                {saving ? 'Zapis…' : 'Zapisz status'}
+              </button>
             )}
           </div>
-        </div>
-
-        <div className="mt-6 grid gap-5 border-t border-white/[0.06] pt-5 sm:grid-cols-[1fr_auto] sm:items-end">
-          <div>
-            <div className="mb-2 flex items-center justify-between text-xs">
-              <span className="font-semibold text-slate-300">Zgłoszenia</span>
-              <span className="font-mono text-slate-400">{tournament.participants.length} <span className="text-slate-600">/</span> {tournament.maxParticipants}</span>
-            </div>
-            <div className="h-2 overflow-hidden rounded-full bg-white/[0.06]">
-              <div className="organizer-progress h-full rounded-full bg-gradient-to-r from-[#0F62FE] via-[#39B4FE] to-[#8A3FFC]" style={{ width: `${percentage}%` }} />
-            </div>
-            <div className="mt-2 flex justify-between text-[10px] text-slate-500">
-              <span>{percentage}% pojemności</span>
-              <span>{Math.max(0, tournament.maxParticipants - tournament.participants.length)} wolnych miejsc</span>
-            </div>
-          </div>
-          <div className="flex gap-5 text-xs">
-            <div><p className="font-mono text-lg font-bold text-white">{tournament.matches.length}</p><p className="text-slate-500">mecze</p></div>
-            <div><p className="font-mono text-lg font-bold text-emerald-200">{tournament.matches.filter((match) => match.status === 'IN_PROGRESS').length}</p><p className="text-slate-500">na żywo</p></div>
-            <div><p className="font-mono text-lg font-bold text-violet-200">{tournament.matches.filter((match) => match.status === 'FINISHED').length}</p><p className="text-slate-500">zakończone</p></div>
-          </div>
-        </div>
+        ) : <span className="text-sm text-muted">Status: {STATUS_LABELS[tournament.status] || tournament.status}</span>}
+        <button
+          type="button"
+          disabled={saving || deleting}
+          onClick={() => onDelete(tournament)}
+          className="btn btn-danger btn-sm"
+          aria-label={`Usuń wydarzenie ${tournament.title}`}
+        >
+          <Icon name="trash" size={16} />
+          {deleting ? 'Usuwanie…' : 'Usuń'}
+        </button>
       </div>
     </article>
   );
 }
 
+/* One match as a list row: state tile, pairing, score and a single action. */
 function MatchRow({ match }) {
   const live = match.status === 'IN_PROGRESS';
+  const finished = match.status === 'FINISHED';
+  const showScore = live || finished;
   return (
-    <article className="organizer-match-row group flex flex-col gap-4 rounded-2xl border border-white/[0.07] bg-[#0C1220]/80 p-4 transition hover:border-[#0F62FE]/40 hover:bg-[#111827] sm:flex-row sm:items-center">
-      <div className="flex items-center gap-3 sm:w-32">
-        {live
-          ? <span className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-emerald-300"><span className="h-2 w-2 animate-pulse rounded-full bg-emerald-300" /> Live</span>
-          : <span className="text-xs text-slate-500">{dateLabel(match.updatedAt, { day: 'numeric', month: 'short' })} · {timeLabel(match.updatedAt)}</span>}
-      </div>
+    <div className="row">
+      <span className="row-tile" data-tone={live ? 'live' : undefined}>
+        <Icon name={live ? 'bolt' : finished ? 'check' : 'clock'} size={19} />
+      </span>
       <div className="min-w-0 flex-1">
-        <p className="truncate text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{match.tournament.title} · Runda {match.round}{match.court ? ` · ${match.court}` : ''}{match.scheduledAt ? ` · ${dateLabel(match.scheduledAt, { day: 'numeric', month: 'short' })} ${timeLabel(match.scheduledAt)}` : ''}</p>
-        <div className="mt-2 flex items-center gap-2 text-sm font-bold text-white">
-          <span className="min-w-0 truncate">{match.player1?.name || 'Oczekuje na uczestnika'}</span>
-          <span className="font-mono text-slate-500">{match.status === 'FINISHED' ? `${match.score1 ?? 0} : ${match.score2 ?? 0}` : '—'}</span>
-          <span className="min-w-0 truncate">{match.player2?.name || 'Oczekuje na uczestnika'}</span>
-        </div>
+        <p className="row-title">
+          {match.player1?.name || 'Oczekuje'} <span className="font-normal text-muted">vs</span> {match.player2?.name || 'Oczekuje'}
+        </p>
+        <p className="row-meta">
+          <Link to={`/organizer/events/${match.tournament.id}`} state={{ tab: 'matches' }} className="hover:text-ink hover:underline">{match.tournament.title}</Link>
+          {' · '}Runda {match.round}{match.court ? ` · ${match.court}` : ''}
+        </p>
       </div>
-      <div className="flex flex-wrap gap-2">
-        <Link to={`/tournaments/${match.tournament.id}/matches/${match.id}/live`} className="rounded-lg bg-[#0F62FE]/15 px-3 py-2 text-xs font-semibold text-blue-200 transition hover:bg-[#0F62FE]/25">
-          Śledź wynik{live ? ' · LIVE' : ''} <span aria-hidden="true">↗</span>
-        </Link>
-        <Link to={`/organizer/events/${match.tournament.id}`} className="rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-300 transition hover:bg-white/[0.05]">
-          Zarządzaj wydarzeniem
-        </Link>
+      <div className="row-end hidden sm:block">
+        {showScore
+          ? <p className={`num text-2xl ${live ? '!text-live' : ''}`}>{match.score1 ?? 0}:{match.score2 ?? 0}</p>
+          : <p className="text-sm font-semibold text-ink">{match.scheduledAt ? formatTime(match.scheduledAt) : '—'}</p>}
+        <p className="text-xs text-muted">
+          {live ? 'trwa' : finished ? 'koniec' : match.scheduledAt ? dateLabel(match.scheduledAt, { day: 'numeric', month: 'short' }) : 'bez terminu'}
+        </p>
       </div>
-    </article>
+      <Link
+        to={`/tournaments/${match.tournament.id}/matches/${match.id}/live`}
+        className="row-btn"
+        data-tone={live ? 'live' : 'ghost'}
+        aria-label={`${live ? 'Oglądaj na żywo' : 'Śledź wynik'}: ${match.player1?.name || 'uczestnik'} vs ${match.player2?.name || 'uczestnik'}`}
+      >
+        {live ? 'Oglądaj' : 'Śledź'}
+      </Link>
+    </div>
   );
 }
 
 export default function OrganizerDashboard() {
   const { user } = useAuth();
+  const confirm = useConfirm();
   const [activeTab, setActiveTab] = useState('overview');
   const [dashboard, setDashboard] = useState({ stats: DEFAULT_STATS, tournaments: [], latestMatches: [] });
   const [loading, setLoading] = useState(true);
@@ -254,6 +220,8 @@ export default function OrganizerDashboard() {
   const [deletingTournamentId, setDeletingTournamentId] = useState('');
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
+
+  useTour('organizer', TOUR, { auto: true, ready: !loading });
 
   const loadDashboard = useCallback(async ({ background = false } = {}) => {
     if (background) setRefreshing(true);
@@ -310,9 +278,12 @@ export default function OrganizerDashboard() {
   }
 
   async function deleteTournament(tournament) {
-    const confirmed = window.confirm(
-      `Czy na pewno usunąć wydarzenie „${tournament.title}”? Usunięte zostaną również zgłoszenia, mecze i historia wyników. Tej operacji nie można cofnąć.`,
-    );
+    const confirmed = await confirm({
+      title: `Usunąć „${tournament.title}”?`,
+      body: 'Usunięte zostaną również zgłoszenia, mecze i historia wyników. Tej operacji nie można cofnąć.',
+      confirmLabel: 'Usuń wydarzenie',
+      tone: 'danger',
+    });
     if (!confirmed) return;
 
     setDeletingTournamentId(tournament.id);
@@ -336,193 +307,374 @@ export default function OrganizerDashboard() {
   const liveMatches = dashboard.tournaments.flatMap((tournament) => tournament.matches
     .filter((match) => match.status === 'IN_PROGRESS')
     .map((match) => ({ ...match, tournament: { id: tournament.id, title: tournament.title, date: tournament.date } })));
-  const upcomingTournaments = [...dashboard.tournaments]
+  const activeTournaments = [...dashboard.tournaments]
     .filter((tournament) => !['FINISHED', 'CANCELLED'].includes(tournament.status))
-    .sort((first, second) => new Date(first.date) - new Date(second.date))
-    .slice(0, 3);
+    .sort((first, second) => new Date(first.date) - new Date(second.date));
+  const passTournaments = [
+    ...activeTournaments,
+    ...dashboard.tournaments.filter((tournament) => ['FINISHED', 'CANCELLED'].includes(tournament.status)),
+  ].slice(0, 8);
   const registrationOpenCount = (dashboard.stats.statuses.OPEN || 0) + (dashboard.stats.statuses.PUBLISHED || 0);
-  const completion = dashboard.stats.matches
-    ? Math.round((dashboard.stats.completedMatches / dashboard.stats.matches) * 100)
-    : 0;
+  const freeSeats = activeTournaments.reduce((sum, tournament) => sum + capacity(tournament.participants.length, tournament.maxParticipants).free, 0);
+  const scheduledCount = Math.max(0, dashboard.stats.matches - dashboard.stats.liveMatches - dashboard.stats.completedMatches);
+  const hasEvents = dashboard.tournaments.length > 0;
+  const step = nextStep(dashboard.tournaments, liveMatches);
+  const tabs = [
+    { id: 'overview', label: 'Przegląd', icon: 'grid' },
+    { id: 'events', label: 'Wydarzenia', icon: 'trophy', badge: dashboard.tournaments.length || null },
+    { id: 'live', label: 'Mecze na żywo', icon: 'bolt', badge: liveMatches.length || null, badgeTone: 'live' },
+    { id: 'participants', label: 'Uczestnicy', icon: 'users' },
+  ];
 
   return (
-    <main className="organizer-dashboard min-h-[calc(100vh-5rem)] overflow-hidden bg-[#090D16] px-4 py-7 text-white sm:px-6 lg:px-8">
-      <div className="organizer-aurora organizer-aurora-one" aria-hidden="true" />
-      <div className="organizer-aurora organizer-aurora-two" aria-hidden="true" />
-      <div className="relative mx-auto max-w-[1440px]">
-        <header className="organizer-reveal mb-8 flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
-          <div>
-            <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-[#39B4FE]/20 bg-[#0F62FE]/[0.08] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.2em] text-[#8BCBFF]">
-              <span className="h-1.5 w-1.5 rounded-full bg-[#39B4FE] shadow-[0_0_12px_#39B4FE]" />
-              Panel organizatora
-            </div>
-            <h1 className="text-3xl font-black tracking-[-0.06em] text-white sm:text-4xl lg:text-5xl">
-              Dzień dobry, <span className="brand-text">{user?.name?.split(' ')[0] || 'Organizator'}</span>
-            </h1>
-            <p className="mt-3 max-w-xl text-sm leading-6 text-slate-400 sm:text-base">
-              Wydarzenia, zgłoszenia i wyniki — uporządkowane w jednym miejscu. Wybierz sekcję albo utwórz wydarzenie.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2.5 text-xs text-slate-400">
-              {new Date().toLocaleDateString('pl-PL', { weekday: 'long', day: 'numeric', month: 'long' })}
-            </span>
-            <button type="button" onClick={() => loadDashboard({ background: true })} disabled={refreshing} className="rounded-xl border border-white/10 px-4 py-2.5 text-xs font-semibold text-slate-200 transition hover:border-[#39B4FE]/40 hover:bg-white/[0.04] disabled:opacity-50">
-              <span className={refreshing ? 'mr-2 inline-block animate-spin' : 'mr-2 inline-block'} aria-hidden="true">⟳</span>
-              {refreshing ? 'Odświeżanie' : 'Odśwież dane'}
-            </button>
-            <Link to="/tournaments/create" className="organizer-primary-button rounded-xl px-4 py-2.5 text-xs font-bold text-white">
-              <span className="mr-1.5 text-base">＋</span> Nowe wydarzenie
-            </Link>
-          </div>
-        </header>
-
-        <nav aria-label="Sekcje panelu organizatora" className="organizer-reveal mb-6 flex gap-2 overflow-x-auto border-b border-white/[0.07] pb-3" style={{ '--reveal-delay': '60ms' }}>
-          {TABS.map((tab) => (
-            <button key={tab.id} type="button" onClick={() => setActiveTab(tab.id)} aria-current={activeTab === tab.id ? 'page' : undefined} className={`flex shrink-0 items-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold transition ${activeTab === tab.id ? 'bg-white/[0.08] text-white shadow-[inset_0_-2px_0_#39B4FE]' : 'text-slate-500 hover:bg-white/[0.04] hover:text-slate-200'}`}>
-              <span className={activeTab === tab.id ? 'text-[#39B4FE]' : ''}>{tab.icon}</span>
-              {tab.label}
-              {tab.id === 'live' && liveMatches.length > 0 && <span className="rounded-full bg-emerald-300/10 px-2 py-0.5 text-[10px] text-emerald-200">{liveMatches.length}</span>}
-            </button>
-          ))}
-        </nav>
+    <main className="page">
+      <div className="shell">
+        <PageHeader
+          eyebrow="Panel organizatora"
+          title={`Dzień dobry, ${user?.name?.split(' ')[0] || 'Organizatorze'}`}
+          actions={(
+            <>
+              <button type="button" onClick={() => loadDashboard({ background: true })} disabled={refreshing} className="icon-btn rounded-full" aria-label={refreshing ? 'Odświeżanie danych' : 'Odśwież dane'} title="Odśwież dane">
+                <Icon name="refresh" size={18} className={refreshing ? 'spin' : ''} />
+              </button>
+              <Link to="/tournaments/create" className="btn btn-solid rounded-full" data-tour="org-new">
+                <Icon name="plus" size={18} /> Nowe wydarzenie
+              </Link>
+            </>
+          )}
+        >
+          Wydarzenia, zgłoszenia i wyniki — uporządkowane w jednym miejscu.{' '}
+          <span className="whitespace-nowrap text-ink">{new Date().toLocaleDateString('pl-PL', { weekday: 'long', day: 'numeric', month: 'long' })}</span>
+        </PageHeader>
 
         {error && (
-          <div className="mb-6 flex flex-col gap-3 rounded-2xl border border-rose-300/20 bg-rose-300/[0.06] p-4 text-sm text-rose-100 sm:flex-row sm:items-center sm:justify-between" role="alert">
-            <span>{error}</span>
-            <button type="button" onClick={() => loadDashboard()} className="shrink-0 rounded-lg border border-rose-200/20 px-3 py-2 text-xs font-bold">Spróbuj ponownie</button>
-          </div>
+          <Notice
+            tone="danger"
+            className="mb-6"
+            action={<button type="button" onClick={() => loadDashboard()} className="btn btn-ghost btn-sm shrink-0">Spróbuj ponownie</button>}
+          >
+            {error}
+          </Notice>
         )}
-        {notice && <div className="mb-6 rounded-2xl border border-emerald-300/20 bg-emerald-300/[0.06] p-4 text-sm text-emerald-100" role="status">{notice}</div>}
+        {notice && <Notice key={notice} className="mb-6" onClose={() => setNotice('')}>{notice}</Notice>}
 
         {loading ? (
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4" aria-label="Ładowanie danych panelu">
-            {[0, 1, 2, 3].map((item) => <div key={item} className="h-36 animate-pulse rounded-3xl border border-white/[0.06] bg-white/[0.03]" />)}
+          <div className="bento lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]" aria-label="Ładowanie danych panelu" role="status">
+            {[0, 1, 2, 3].map((item) => <div key={item} className="skeleton h-72 !rounded-[24px]" />)}
           </div>
+        ) : !hasEvents && !error ? (
+          <Reveal>
+            <EmptyState
+              icon="bracket"
+              title="Czas na pierwszy turniej"
+              action={<Link to="/tournaments/create" className="btn btn-primary btn-lg" data-tour="org-next">Stwórz wydarzenie <Arrow /></Link>}
+            >
+              Kreator zada kilka prostych pytań i poprowadzi Cię do publikacji. Potem ten panel pokaże zgłoszenia, harmonogram i wyniki.
+            </EmptyState>
+            <ol className="steps mt-6 md:grid-cols-4">
+              {[
+                ['Stwórz wydarzenie', 'Termin, format i zasady w 4 krokach.'],
+                ['Zbierz zgłoszenia', 'Zawodnicy zapisują się sami.'],
+                ['Wygeneruj harmonogram', 'Mecze powstają jednym kliknięciem.'],
+                ['Śledź wyniki', 'Sędziowie wprowadzają je na żywo.'],
+              ].map(([title, body], index) => (
+                <li key={title} className="step" data-state={index === 0 ? 'current' : 'todo'}>
+                  <span className="step-index">{index + 1}</span>
+                  <span>
+                    <span className="block font-semibold text-ink">{title}</span>
+                    <span className="mt-0.5 block text-sm text-muted">{body}</span>
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </Reveal>
         ) : (
           <>
-            {activeTab === 'overview' && (
-              <div className="space-y-6">
-                <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Podsumowanie wydarzeń">
-                  <StatCard label="Wydarzenia" value={dashboard.stats.tournaments} detail={`${registrationOpenCount} z aktywnymi zapisami`} icon="✦" accent="bg-blue-500/20" />
-                  <StatCard label="Zgłoszeni uczestnicy" value={dashboard.stats.participants} detail="Suma zapisów ze wszystkich wydarzeń" icon="◎" accent="bg-violet-500/20" delay={60} />
-                  <StatCard label="Mecze na żywo" value={dashboard.stats.liveMatches} detail={`${dashboard.stats.matches} meczów łącznie`} icon="◉" accent="bg-emerald-500/20" delay={120} />
-                  <StatCard label="Ukończone mecze" value={`${completion}%`} detail={`${dashboard.stats.completedMatches} z ${dashboard.stats.matches} rozegranych`} icon="↗" accent="bg-cyan-500/20" delay={180} />
-                </section>
-
-                <section className="organizer-feature-card organizer-reveal relative overflow-hidden rounded-[28px] border border-white/[0.08] p-6 sm:p-8" style={{ '--reveal-delay': '120ms' }}>
-                  <div className="organizer-feature-grid absolute inset-0 opacity-50" aria-hidden="true" />
-                  <div className="organizer-feature-glow absolute -right-24 -top-36 h-96 w-96 rounded-full bg-[#0F62FE]/20 blur-[100px]" aria-hidden="true" />
-                  <div className="relative grid gap-8 lg:grid-cols-[1fr_auto] lg:items-center">
-                    <div className="max-w-2xl">
-                      <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-[#81C7FF]">Centrum dowodzenia</p>
-                      <h2 className="mt-3 text-2xl font-black tracking-[-0.04em] sm:text-3xl">Turniej pod kontrolą.<br /><span className="text-slate-400">Wyniki bez niespodzianek.</span></h2>
-                      <p className="mt-3 max-w-xl text-sm leading-6 text-slate-400">
-                        Dane odświeżają się automatycznie. Przejdź do wydarzenia, aby sprawdzić składy, drabinkę i aktualny wynik każdego spotkania.
-                      </p>
-                      <button type="button" onClick={() => setActiveTab('events')} className="mt-5 rounded-xl bg-white px-4 py-3 text-xs font-bold text-[#090D16] transition hover:-translate-y-0.5 hover:shadow-[0_10px_30px_rgba(255,255,255,0.15)]">
-                        Otwórz wydarzenia <span className="ml-2">→</span>
-                      </button>
-                    </div>
-                    <div className="organizer-orbit mx-auto grid h-44 w-44 place-items-center rounded-full border border-white/[0.09] sm:h-52 sm:w-52">
-                      <div className="organizer-orbit-inner grid h-32 w-32 place-items-center rounded-full border border-[#39B4FE]/20 bg-[#090D16]/70 shadow-[0_0_70px_rgba(15,98,254,0.18)] sm:h-40 sm:w-40">
-                        <div className="text-center"><span className="text-4xl">🏆</span><p className="mt-2 text-[9px] font-bold uppercase tracking-[0.2em] text-[#81C7FF]">TourniDesk</p></div>
-                      </div>
-                    </div>
-                  </div>
-                </section>
-
-                <div className="grid gap-6 xl:grid-cols-[1.35fr_0.85fr]">
-                  <section className="organizer-reveal rounded-3xl border border-white/[0.08] bg-[#111827]/75 p-5 sm:p-6" style={{ '--reveal-delay': '180ms' }}>
-                    <div className="mb-5 flex items-end justify-between gap-3">
-                      <div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Twoje wydarzenia</p><h2 className="mt-1 text-xl font-bold text-white">Najbliższe terminy</h2></div>
-                      <button type="button" onClick={() => setActiveTab('events')} className="text-xs font-semibold text-[#81C7FF] hover:text-white">Wszystkie →</button>
-                    </div>
-                    {upcomingTournaments.length ? (
-                      <div className="space-y-3">
-                        {upcomingTournaments.map((tournament, index) => (
-                          <Link key={tournament.id} to={`/organizer/events/${tournament.id}`} className="organizer-upcoming-row flex items-center gap-4 rounded-2xl border border-white/[0.06] bg-[#0C1220]/75 p-4 transition hover:border-[#0F62FE]/30" style={{ '--row-index': index }}>
-                            <div className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-[#0F62FE]/20 to-[#8A3FFC]/20 text-xl">{SPORT_ICONS[tournament.sportType] || '🏆'}</div>
-                            <div className="min-w-0 flex-1"><p className="truncate text-sm font-bold text-white">{tournament.title}</p><p className="mt-1 text-xs text-slate-500">{tournament.participants.length}/{tournament.maxParticipants} zgłoszeń · {tournament.matches.length} meczów</p></div>
-                            <div className="text-right"><p className="text-xs font-bold text-slate-200">{dateLabel(tournament.date, { day: 'numeric', month: 'short' })}</p><p className="mt-1 text-[10px] text-slate-500">{timeLabel(tournament.date)}</p></div>
-                          </Link>
-                        ))}
-                      </div>
-                    ) : <EmptyState title="Czas na pierwszy turniej" detail="Utwórz wydarzenie, a wszystkie zgłoszenia i wyniki pojawią się tutaj." action={<Link to="/tournaments/create" className="mt-5 inline-flex rounded-xl bg-gradient-to-r from-[#0F62FE] to-[#8A3FFC] px-4 py-2.5 text-xs font-bold text-white">Stwórz wydarzenie</Link>} />}
-                  </section>
-
-                  <section className="organizer-reveal rounded-3xl border border-white/[0.08] bg-[#111827]/75 p-5 sm:p-6" style={{ '--reveal-delay': '240ms' }}>
-                    <div className="mb-6"><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Stan rozgrywek</p><h2 className="mt-1 text-xl font-bold text-white">Postęp meczów</h2></div>
-                    <div className="flex items-end gap-2">
-                      <span className="text-5xl font-black tracking-[-0.06em] text-white">{completion}<span className="text-2xl text-slate-500">%</span></span>
-                      <span className="mb-2 text-xs text-slate-500">zakończonych meczów</span>
-                    </div>
-                    <div className="mt-5 h-3 overflow-hidden rounded-full bg-white/[0.06]">
-                      <div className="organizer-progress h-full rounded-full bg-gradient-to-r from-[#0F62FE] via-[#39B4FE] to-[#8A3FFC]" style={{ width: `${completion}%` }} />
-                    </div>
-                    <div className="mt-5 grid grid-cols-3 gap-2 border-t border-white/[0.06] pt-5 text-center">
-                      <div><p className="font-mono text-xl font-bold text-white">{dashboard.stats.matches}</p><p className="mt-1 text-[10px] text-slate-500">wszystkie</p></div>
-                      <div><p className="font-mono text-xl font-bold text-emerald-200">{dashboard.stats.liveMatches}</p><p className="mt-1 text-[10px] text-slate-500">na żywo</p></div>
-                      <div><p className="font-mono text-xl font-bold text-violet-200">{dashboard.stats.completedMatches}</p><p className="mt-1 text-[10px] text-slate-500">zakończone</p></div>
-                    </div>
-                  </section>
+            {step && (
+              <Reveal className="next-banner mb-6 flex flex-col gap-4 border-[1.5px] border-ink bg-accent p-5 text-accent-ink sm:flex-row sm:items-center sm:p-6" data-tour="org-next">
+                <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-accent-ink text-accent"><Icon name={step.icon} size={24} /></span>
+                <div className="min-w-0 flex-1">
+                  <p className="mono text-[0.6875rem] font-semibold uppercase tracking-[0.14em] opacity-70">Co dalej?</p>
+                  <h2 className="mt-1 break-words font-display text-2xl font-bold uppercase leading-tight">{step.title}</h2>
+                  <p className="mt-1 text-[0.9375rem] leading-snug opacity-80">{step.body}</p>
                 </div>
-
-                <section className="organizer-reveal rounded-3xl border border-white/[0.08] bg-[#111827]/75 p-5 sm:p-6" style={{ '--reveal-delay': '300ms' }}>
-                  <div className="mb-5 flex items-end justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Ostatnia aktywność</p><h2 className="mt-1 text-xl font-bold text-white">Wyniki i mecze</h2></div><button type="button" onClick={() => setActiveTab('live')} className="text-xs font-semibold text-[#81C7FF] hover:text-white">Mecze →</button></div>
-                  {dashboard.latestMatches.length ? <div className="grid gap-3 md:grid-cols-2">{dashboard.latestMatches.slice(0, 4).map((match) => <MatchRow key={match.id} match={match} />)}</div> : <p className="rounded-2xl border border-white/[0.06] bg-[#0C1220]/75 p-5 text-sm text-slate-500">Po utworzeniu meczów pojawią się tutaj ich bieżące wyniki.</p>}
-                </section>
-              </div>
+                {step.to ? (
+                  <Link to={step.to} state={step.state} className="btn shrink-0 rounded-full border-accent-ink bg-accent-ink text-accent hover:bg-transparent hover:text-accent-ink">{step.label} <Arrow /></Link>
+                ) : (
+                  <button type="button" onClick={() => setActiveTab(step.tab)} className="btn shrink-0 rounded-full border-accent-ink bg-accent-ink text-accent hover:bg-transparent hover:text-accent-ink">{step.label} <Arrow /></button>
+                )}
+              </Reveal>
             )}
 
-            {activeTab === 'events' && (
-              <section className="space-y-5">
-                <div className="organizer-reveal flex flex-col gap-4 rounded-3xl border border-white/[0.08] bg-[#111827]/75 p-5 sm:flex-row sm:items-end sm:justify-between">
-                  <div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Zarządzanie</p><h2 className="mt-1 text-2xl font-black text-white">Wydarzenia <span className="text-slate-500">({filteredTournaments.length})</span></h2></div>
-                  <div className="grid gap-2 sm:grid-cols-[minmax(180px,1fr)_190px]">
-                    <label className="sr-only" htmlFor="event-search">Szukaj wydarzenia</label>
-                    <input id="event-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Szukaj po nazwie, miejscu…" className="min-h-11 rounded-xl border border-white/10 bg-[#090D16] px-4 text-sm text-white placeholder:text-slate-600 focus:border-[#0F62FE] focus:outline-none" />
-                    <label className="sr-only" htmlFor="event-status">Filtruj po statusie</label>
-                    <select id="event-status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="min-h-11 rounded-xl border border-white/10 bg-[#090D16] px-3 text-sm text-slate-200 focus:border-[#0F62FE] focus:outline-none">
-                      <option value="ALL">Wszystkie statusy</option>
-                      {Object.entries(STATUS_LABELS).map(([status, label]) => <option key={status} value={status}>{label}</option>)}
-                    </select>
-                  </div>
+            <Tabs tabs={tabs} value={activeTab} onChange={setActiveTab} label="Sekcje panelu organizatora" className="tabs-seg mb-6" data-tour="org-tabs" />
+
+            <TabPanel id={activeTab}>
+              {activeTab === 'overview' && (
+                <div className="bento">
+                  <Reveal stagger={0.1} className="bento lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
+                    <Panel
+                      icon="users"
+                      title="Zgłoszeni uczestnicy"
+                      subtitle="Suma ze wszystkich Twoich wydarzeń"
+                      action={<span className="soft-chip"><Icon name="trophy" size={14} />{dashboard.stats.tournaments} {plural(dashboard.stats.tournaments, 'wydarzenie', 'wydarzenia', 'wydarzeń')}</span>}
+                      data-tour="org-stats"
+                    >
+                      <div className="panel-body flex flex-1 flex-col">
+                        <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-5">
+                          <div>
+                            <p className="panel-figure"><CountUp to={dashboard.stats.participants} duration={1.2} /></p>
+                            <p className="mt-3 flex flex-wrap items-center gap-2 text-sm text-muted">
+                              <span className="chip" data-tone="accent">{registrationOpenCount} z zapisami</span>
+                              {freeSeats} {plural(freeSeats, 'wolne miejsce', 'wolne miejsca', 'wolnych miejsc')}
+                            </p>
+                          </div>
+                          <div className="w-full sm:w-60">
+                            <p className="mb-2.5 flex items-baseline justify-between text-xs font-semibold text-muted">
+                              <span>Mecze</span>
+                              <span className="mono text-ink">{dashboard.stats.matches}</span>
+                            </p>
+                            <StackBar
+                              label={`${dashboard.stats.completedMatches} zakończonych, ${dashboard.stats.liveMatches} na żywo, ${scheduledCount} zaplanowanych`}
+                              segments={[
+                                { label: 'Zakończone', value: dashboard.stats.completedMatches, color: 'var(--mark)' },
+                                { label: 'Na żywo', value: dashboard.stats.liveMatches, color: 'var(--live)' },
+                                { label: 'Zaplanowane', value: scheduledCount, color: 'var(--line-2)' },
+                              ]}
+                            />
+                          </div>
+                        </div>
+                        <div className="panel-actions mt-auto pt-7">
+                          <Link to="/tournaments/create" className="btn btn-solid"><Icon name="plus" size={17} /> Nowe wydarzenie</Link>
+                          <button type="button" onClick={() => setActiveTab('live')} className="btn btn-ghost">
+                            <Icon name="bolt" size={17} /> Na żywo
+                            {liveMatches.length > 0 && <span className="chip !h-[22px] !px-2" data-tone="live">{liveMatches.length}</span>}
+                          </button>
+                          <button type="button" onClick={() => setActiveTab('participants')} className="btn btn-ghost"><Icon name="users" size={17} /> Zgłoszenia</button>
+                        </div>
+                      </div>
+                    </Panel>
+
+                    <Panel
+                      icon="trophy"
+                      title="Moje wydarzenia"
+                      subtitle="Przewiń i kliknij kartę, aby zarządzać"
+                      action={<button type="button" onClick={() => setActiveTab('events')} className="soft-chip">Wszystkie <Icon name="arrow-right" size={14} /></button>}
+                      data-tour="org-passes"
+                    >
+                      <div className="pt-4">
+                        <PassRail label="Twoje wydarzenia">
+                          {passTournaments.map((tournament, index) => {
+                            const live = tournament.matches.some((match) => match.status === 'IN_PROGRESS');
+                            return (
+                              <div key={tournament.id} role="listitem" className="flex">
+                                <EventPass
+                                  to={`/organizer/events/${tournament.id}`}
+                                  label={`Zarządzaj wydarzeniem ${tournament.title}`}
+                                  index={index}
+                                  sport={tournament.sportType}
+                                  title={tournament.title}
+                                  live={live}
+                                  tag={live ? 'Na żywo' : STATUS_LABELS[tournament.status] || tournament.status}
+                                  date={tournament.date}
+                                  facts={[
+                                    ['Zgłoszenia', `${tournament.participants.length}/${tournament.maxParticipants}`],
+                                    ['Miejsce', tournament.location || 'Do ustalenia'],
+                                  ]}
+                                />
+                              </div>
+                            );
+                          })}
+                          <div role="listitem" className="flex">
+                            <PassAdd to="/tournaments/create">Nowe wydarzenie</PassAdd>
+                          </div>
+                        </PassRail>
+                      </div>
+                      <PanelStats
+                        items={[
+                          ['Aktywne', activeTournaments.length],
+                          ['Na żywo', liveMatches.length, liveMatches.length ? 'live' : undefined],
+                          ['Najbliższy termin', activeTournaments[0] ? dateLabel(activeTournaments[0].date, { day: 'numeric', month: 'short' }) : '—'],
+                        ]}
+                      />
+                    </Panel>
+                  </Reveal>
+
+                  <Reveal stagger={0.1} className="bento lg:grid-cols-2">
+                    <Panel
+                      icon="list"
+                      title="Zapisy na wydarzenia"
+                      subtitle="Zajętość miejsc w aktywnych wydarzeniach"
+                      action={(
+                        <button type="button" onClick={() => loadDashboard({ background: true })} disabled={refreshing} className="soft-chip">
+                          <Icon name="refresh" size={14} className={refreshing ? 'spin' : ''} /> Odśwież
+                        </button>
+                      )}
+                    >
+                      <div className="panel-body">
+                        {activeTournaments.length ? (
+                          <div className="rows">
+                            {activeTournaments.slice(0, 5).map((tournament) => {
+                              const seats = capacity(tournament.participants.length, tournament.maxParticipants);
+                              return (
+                                <Link key={tournament.id} to={`/organizer/events/${tournament.id}`} state={{ tab: 'participants' }} className="row">
+                                  <span className="row-tile"><Icon name={sportIcon(tournament.sportType)} size={20} /></span>
+                                  <div className="min-w-0 flex-1">
+                                    <p className="row-title">{tournament.title}</p>
+                                    <p className="row-meta">{dateLabel(tournament.date, { day: 'numeric', month: 'short' })} · {STATUS_LABELS[tournament.status]}</p>
+                                  </div>
+                                  <Meter value={seats.percent} label={`Zajęte ${seats.percent}% miejsc`} className="hidden w-24 sm:block md:w-32" />
+                                  <div className="row-end w-14">
+                                    <p className="num text-xl">{seats.taken}<span className="text-sm text-muted">/{seats.limit}</span></p>
+                                  </div>
+                                </Link>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <p className="well p-5 text-sm text-muted">Nie masz aktywnych wydarzeń. Utwórz nowe, aby pojawiło się tutaj.</p>
+                        )}
+                      </div>
+                    </Panel>
+
+                    <Panel
+                      icon="whistle"
+                      title="Mecze i wyniki"
+                      subtitle="Ostatnia aktywność sędziów"
+                      action={<button type="button" onClick={() => setActiveTab('live')} className="soft-chip">Na żywo <Icon name="arrow-right" size={14} /></button>}
+                    >
+                      <div className="panel-body">
+                        {dashboard.latestMatches.length
+                          ? <div className="rows">{dashboard.latestMatches.slice(0, 5).map((match) => <MatchRow key={match.id} match={match} />)}</div>
+                          : <p className="well p-5 text-sm text-muted">Po utworzeniu meczów pojawią się tutaj ich bieżące wyniki.</p>}
+                      </div>
+                    </Panel>
+                  </Reveal>
                 </div>
-                {filteredTournaments.length ? <div className="grid gap-4">{filteredTournaments.map((tournament, index) => <div key={`${tournament.id}-${tournament.status}`} style={{ '--reveal-delay': `${Math.min(index * 45, 270)}ms` }}><TournamentCard tournament={tournament} saving={savingTournamentId === tournament.id} deleting={deletingTournamentId === tournament.id} onStatusChange={changeTournamentStatus} onDelete={deleteTournament} /></div>)}</div>
-                  : <EmptyState title={dashboard.tournaments.length ? 'Brak wyników dla tych filtrów' : 'Nie masz jeszcze wydarzeń'} detail={dashboard.tournaments.length ? 'Zmień frazę wyszukiwania albo wybierz inny status.' : 'Stwórz pierwsze wydarzenie — panel automatycznie pokaże jego uczestników i mecze.'} action={!dashboard.tournaments.length && <Link to="/tournaments/create" className="mt-5 inline-flex rounded-xl bg-gradient-to-r from-[#0F62FE] to-[#8A3FFC] px-4 py-2.5 text-xs font-bold text-white">Utwórz wydarzenie</Link>} />}
-              </section>
-            )}
+              )}
 
-            {activeTab === 'live' && (
-              <section className="organizer-reveal rounded-3xl border border-white/[0.08] bg-[#111827]/75 p-5 sm:p-6">
-                <div className="mb-5 flex items-end justify-between gap-4"><div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-emerald-300">Aktualny stan bazy</p><h2 className="mt-1 text-2xl font-black text-white">Mecze na żywo</h2></div><span className="rounded-full border border-emerald-300/20 bg-emerald-300/[0.06] px-3 py-1.5 text-xs font-bold text-emerald-200">{liveMatches.length} aktywne</span></div>
-                {liveMatches.length ? <div className="space-y-3">{liveMatches.map((match) => <MatchRow key={match.id} match={match} />)}</div>
-                  : <EmptyState title="Na razie cisza na boisku" detail="Gdy sędzia rozpocznie mecz, jego wynik i status pojawią się tutaj na żywo." action={<button type="button" onClick={() => setActiveTab('events')} className="mt-5 rounded-xl border border-white/10 px-4 py-2.5 text-xs font-bold text-white">Zobacz wydarzenia</button>} />}
-              </section>
-            )}
+              {activeTab === 'events' && (
+                <section>
+                  <div className="panel mb-4 p-3 sm:p-4">
+                  <div className="grid gap-3 sm:grid-cols-[1fr_230px_auto] sm:items-center">
+                    <div>
+                      <label className="sr-only" htmlFor="event-search">Szukaj wydarzenia</label>
+                      <input id="event-search" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Szukaj po nazwie, miejscu…" className="input" />
+                    </div>
+                    <div>
+                      <label className="sr-only" htmlFor="event-status">Filtruj po statusie</label>
+                      <select id="event-status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="input">
+                        <option value="ALL">Wszystkie statusy</option>
+                        {Object.entries(STATUS_LABELS).map(([status, label]) => <option key={status} value={status}>{label}</option>)}
+                      </select>
+                    </div>
+                    <p className="px-1 text-sm text-muted" aria-live="polite">
+                      <span className="font-semibold text-ink">{filteredTournaments.length}</span> {plural(filteredTournaments.length, 'wydarzenie', 'wydarzenia', 'wydarzeń')}
+                    </p>
+                  </div>
+                  </div>
+                  {filteredTournaments.length ? (
+                    <div className="grid gap-4">
+                      {filteredTournaments.map((tournament) => (
+                        <TournamentCard
+                          key={`${tournament.id}-${tournament.status}`}
+                          tournament={tournament}
+                          saving={savingTournamentId === tournament.id}
+                          deleting={deletingTournamentId === tournament.id}
+                          onStatusChange={changeTournamentStatus}
+                          onDelete={deleteTournament}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <EmptyState
+                      icon="search"
+                      title={hasEvents ? 'Brak wyników dla tych filtrów' : 'Nie masz jeszcze wydarzeń'}
+                      action={hasEvents
+                        ? <button type="button" className="btn btn-solid" onClick={() => { setQuery(''); setStatusFilter('ALL'); }}>Wyczyść filtry</button>
+                        : <Link to="/tournaments/create" className="btn btn-primary">Utwórz wydarzenie <Arrow /></Link>}
+                    >
+                      {hasEvents ? 'Zmień frazę wyszukiwania albo wybierz inny status.' : 'Stwórz pierwsze wydarzenie — panel automatycznie pokaże jego uczestników i mecze.'}
+                    </EmptyState>
+                  )}
+                </section>
+              )}
 
-            {activeTab === 'participants' && (
-              <section className="organizer-reveal space-y-4">
-                <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Rejestr uczestników</p><h2 className="mt-1 text-2xl font-black text-white">Zgłoszenia <span className="text-slate-500">({dashboard.stats.participants})</span></h2></div><p className="text-xs text-slate-500">Dane aktualizowane automatycznie co minutę</p></div>
-                {dashboard.tournaments.some((tournament) => tournament.participants.length) ? dashboard.tournaments.filter((tournament) => tournament.participants.length).map((tournament) => (
-                  <article key={tournament.id} className="overflow-hidden rounded-3xl border border-white/[0.08] bg-[#111827]/80">
-                    <div className="flex flex-col gap-3 border-b border-white/[0.06] p-5 sm:flex-row sm:items-center sm:justify-between">
-                      <div><h3 className="font-bold text-white">{tournament.title}</h3><p className="mt-1 text-xs text-slate-500">{tournament.participants.length} z {tournament.maxParticipants} zgłoszeń</p></div>
-                      <div className="flex items-center gap-3"><StatusPill status={tournament.status} /><Link to={`/organizer/events/${tournament.id}`} className="text-xs font-semibold text-[#81C7FF] hover:text-white">Zarządzaj →</Link></div>
+              {activeTab === 'live' && (
+                <section>
+                  {liveMatches.length
+                    ? (
+                      <Panel icon="bolt" title={`Mecze na żywo · ${liveMatches.length}`} subtitle="Wyniki wprowadzane przez sędziów w tej chwili">
+                        <div className="panel-body"><div className="rows">{liveMatches.map((match) => <MatchRow key={match.id} match={match} />)}</div></div>
+                      </Panel>
+                    )
+                    : (
+                      <EmptyState
+                        icon="whistle"
+                        title="Na razie cisza na boisku"
+                        action={<button type="button" onClick={() => setActiveTab('events')} className="btn btn-ghost">Zobacz wydarzenia</button>}
+                      >
+                        Gdy sędzia rozpocznie mecz, jego wynik i status pojawią się tutaj na żywo.
+                      </EmptyState>
+                    )}
+                </section>
+              )}
+
+              {activeTab === 'participants' && (
+                <section>
+                  <p className="mb-4 text-sm text-muted">
+                    <span className="font-semibold text-ink">{dashboard.stats.participants}</span> {plural(dashboard.stats.participants, 'zgłoszenie', 'zgłoszenia', 'zgłoszeń')} · dane odświeżają się co minutę
+                  </p>
+                  {dashboard.tournaments.some((tournament) => tournament.participants.length) ? (
+                    <div className="grid gap-4">
+                      {dashboard.tournaments.filter((tournament) => tournament.participants.length).map((tournament) => (
+                        <article key={tournament.id} className="panel overflow-hidden">
+                          <div className="flex flex-col gap-3 border-b border-line p-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+                            <div className="flex min-w-0 items-center gap-3">
+                              <SportBadge sport={tournament.sportType} />
+                              <div className="min-w-0">
+                                <h3 className="panel-title truncate">{tournament.title}</h3>
+                                <p className="panel-sub">{tournament.participants.length} z {tournament.maxParticipants} zgłoszeń</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <StatusChip status={tournament.status} />
+                              <Link to={`/organizer/events/${tournament.id}`} state={{ tab: 'participants' }} className="btn btn-ghost btn-sm rounded-full">Zarządzaj <Arrow size={16} /></Link>
+                            </div>
+                          </div>
+                          <div className="overflow-x-auto">
+                            <table className="table min-w-[520px]">
+                              <thead><tr><th scope="col">Uczestnik</th><th scope="col">Kontakt</th><th scope="col">Zgłoszono</th></tr></thead>
+                              <tbody>
+                                {tournament.participants.map((participant) => (
+                                  <tr key={participant.id}>
+                                    <td>
+                                      <div className="flex items-center gap-3">
+                                        <Avatar name={participant.user.name} className="!h-8 !w-8" />
+                                        <span className="font-semibold text-ink">{participant.user.name}</span>
+                                      </div>
+                                    </td>
+                                    <td className="text-muted">{participant.user.email}</td>
+                                    <td className="mono text-sm text-muted">{dateLabel(participant.joinedAt)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </article>
+                      ))}
                     </div>
-                    <div className="overflow-x-auto">
-                      <table className="w-full min-w-[560px] text-left text-sm">
-                        <thead className="text-[10px] uppercase tracking-[0.14em] text-slate-500"><tr><th className="px-5 py-3 font-semibold">Uczestnik</th><th className="px-5 py-3 font-semibold">Kontakt</th><th className="px-5 py-3 font-semibold">Zgłoszono</th><th className="px-5 py-3 font-semibold">Status turnieju</th></tr></thead>
-                        <tbody className="divide-y divide-white/[0.05]">
-                          {tournament.participants.map((participant) => <tr key={participant.id} className="transition hover:bg-white/[0.02]"><td className="px-5 py-3.5"><div className="flex items-center gap-3"><span className="grid h-8 w-8 place-items-center rounded-xl bg-gradient-to-br from-[#0F62FE]/30 to-[#8A3FFC]/30 text-xs font-bold">{participant.user.name?.charAt(0)?.toUpperCase() || '?'}</span><span className="font-semibold text-slate-200">{participant.user.name}</span></div></td><td className="px-5 py-3.5 text-slate-400">{participant.user.email}</td><td className="px-5 py-3.5 text-slate-400">{dateLabel(participant.joinedAt)}</td><td className="px-5 py-3.5"><StatusPill status={tournament.status} /></td></tr>)}
-                        </tbody>
-                      </table>
-                    </div>
-                  </article>
-                )) : <EmptyState title="Brak zgłoszeń" detail="Zapisy uczestników pojawią się tutaj, gdy dołączą do Twoich wydarzeń." action={<button type="button" onClick={() => setActiveTab('events')} className="mt-5 rounded-xl border border-white/10 px-4 py-2.5 text-xs font-bold text-white">Przejdź do wydarzeń</button>} />}
-              </section>
-            )}
+                  ) : (
+                    <EmptyState
+                      icon="users"
+                      title="Brak zgłoszeń"
+                      action={<button type="button" onClick={() => setActiveTab('events')} className="btn btn-ghost">Przejdź do wydarzeń</button>}
+                    >
+                      Zapisy uczestników pojawią się tutaj, gdy dołączą do Twoich wydarzeń.
+                    </EmptyState>
+                  )}
+                </section>
+              )}
+            </TabPanel>
           </>
         )}
       </div>

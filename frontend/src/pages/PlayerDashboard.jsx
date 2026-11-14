@@ -2,167 +2,75 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
+import { TOURNAMENT_STATUS, formatDate, formatDateTime, formatTime, plural } from '../lib/labels';
+import { scrollToTarget } from '../lib/motion';
+import Icon from '../components/Icon';
+import Reveal from '../components/Reveal';
+import { useTour } from '../components/Tour';
+import { EventPass, Panel, PanelStats, PassAdd, PassRail } from '../components/Dashboard';
+import { Arrow, EmptyState, LiveChip, Meter, Notice, PageHeader } from '../components/ui';
 
 const MATCH_FILTERS = [
-  { id: 'ALL', label: 'Wszystkie mecze' },
+  { id: 'ALL', label: 'Wszystkie' },
   { id: 'SCHEDULED', label: 'Nadchodzące' },
   { id: 'IN_PROGRESS', label: 'Na żywo' },
   { id: 'FINISHED', label: 'Zakończone' },
 ];
 
-const MATCH_STATUS = {
-  SCHEDULED: 'Zaplanowany',
-  IN_PROGRESS: 'Na żywo',
-  FINISHED: 'Zakończony',
-};
+const TOUR = [
+  { target: '[data-tour="player-next"]', title: 'Najważniejsze na górze', body: 'Tu zawsze widzisz swój najbliższy mecz: kiedy, gdzie i z kim grasz, oraz swój bilans. Gdy mecz trwa, obejrzysz go stąd na żywo.' },
+  { target: '[data-tour="player-events"]', title: 'Twoje karnety', body: 'Każda karta to wydarzenie, na które jesteś zapisany. Przewiń je w bok i kliknij, aby zobaczyć drabinkę i tabelę.' },
+  { target: '[data-tour="player-stats"]', title: 'Szybkie podsumowanie', body: 'Twoje mecze w liczbach — nadchodzące, trwające, zakończone i wygrane.' },
+  { target: '[data-tour="player-matches"]', title: 'Terminarz meczów', body: 'Filtruj mecze jednym kliknięciem i przechodź do wyniku na żywo.' },
+];
 
-const TOURNAMENT_STATUS = {
-  DRAFT: 'Szkic',
-  OPEN: 'Zapisy otwarte',
-  PUBLISHED: 'Opublikowany',
-  IN_PROGRESS: 'W trakcie',
-  FINISHED: 'Zakończony',
-  CANCELLED: 'Anulowany',
-};
-
-const MATCH_STATUS_STYLE = {
-  SCHEDULED: 'border-blue-300/15 bg-blue-300/10 text-blue-200',
-  IN_PROGRESS: 'border-emerald-300/15 bg-emerald-300/10 text-emerald-200',
-  FINISHED: 'border-violet-300/15 bg-violet-300/10 text-violet-200',
-};
-
-const SPORT_LABELS = {
-  BEACH_VOLLEYBALL: 'Siatkówka plażowa',
-  FOOTBALL_6V6: 'Piłka nożna 6v6',
-  SOCCER: 'Piłka nożna',
-  BASKETBALL: 'Koszykówka',
-  VOLLEYBALL: 'Siatkówka',
-  TENNIS: 'Tenis',
-  ESPORTS: 'E-sport',
-  CUSTOM: 'Własna dyscyplina',
-  OTHER: 'Inna dyscyplina',
-};
-
-function dateLabel(value, options = {}) {
-  if (!value) return 'Termin nieustalony';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? 'Termin nieustalony'
-    : date.toLocaleString('pl-PL', {
-      weekday: 'short',
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      ...options,
-    });
-}
-
-function MetricCard({ label, value, detail, accent }) {
-  return (
-    <article className={`relative overflow-hidden rounded-2xl border ${accent} bg-[#111827]/85 p-4 sm:p-5`}>
-      <div className="pointer-events-none absolute -right-8 -top-8 h-24 w-24 rounded-full bg-current opacity-[0.06] blur-2xl" aria-hidden="true" />
-      <p className="text-xs font-semibold text-slate-400">{label}</p>
-      <p className="mt-2 text-3xl font-black tabular-nums text-white">{value}</p>
-      <p className="mt-1 text-[11px] text-slate-500">{detail}</p>
-    </article>
-  );
-}
-
-function MatchCard({ match, userId }) {
+function sideOf(match, userId) {
   const mySide = match.player1Id === userId ? 1 : 2;
-  const opponent = mySide === 1 ? match.player2 : match.player1;
-  const myScore = mySide === 1 ? match.score1 : match.score2;
-  const opponentScore = mySide === 1 ? match.score2 : match.score1;
-
-  return (
-    <article className="overflow-hidden rounded-2xl border border-white/[0.08] bg-[#111827]/80 transition hover:border-[#0F62FE]/35">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] px-4 py-3">
-        <div className="min-w-0">
-          <Link to={`/tournaments/${match.tournament.id}`} className="truncate text-sm font-bold text-white hover:text-[#81C7FF]">
-            {match.tournament.title}
-          </Link>
-          <p className="mt-1 text-xs text-slate-500">
-            {dateLabel(match.scheduledAt || match.tournament.date)} · Runda {match.round}
-            {match.groupKey ? ` · ${match.groupKey}` : ''}
-            {match.court ? ` · ${match.court}` : ''}
-          </p>
-        </div>
-        <span className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[10px] font-bold ${MATCH_STATUS_STYLE[match.status] || MATCH_STATUS_STYLE.SCHEDULED}`}>
-          {match.status === 'IN_PROGRESS' && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-300" aria-hidden="true" />}
-          {MATCH_STATUS[match.status] || match.status}
-        </span>
-      </div>
-      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-4 py-5 sm:px-5">
-        <div className="min-w-0">
-          <p className="text-[10px] font-bold uppercase tracking-wider text-[#81C7FF]">Ty</p>
-          <p className="mt-1 truncate text-sm font-bold text-white sm:text-base">{mySide === 1 ? match.player1?.name : match.player2?.name}</p>
-        </div>
-        <p className="min-w-16 text-center font-mono text-lg font-black text-white">
-          {match.status === 'SCHEDULED' ? 'VS' : `${myScore ?? 0} : ${opponentScore ?? 0}`}
-        </p>
-        <div className="min-w-0 text-right">
-          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Przeciwnik</p>
-          <p className="mt-1 truncate text-sm font-bold text-slate-200 sm:text-base">{opponent?.name || 'Oczekiwanie na awans'}</p>
-        </div>
-      </div>
-      {match.winnerId && (
-        <p className="border-t border-white/[0.06] px-4 py-2 text-xs font-semibold text-emerald-200">
-          {match.winnerId === userId ? 'Wygrana' : 'Zwycięzca'}: {match.winnerId === match.player1Id ? match.player1?.name : match.player2?.name}
-        </p>
-      )}
-      <div className="flex justify-end border-t border-white/[0.06] bg-black/10 px-4 py-3">
-        <Link
-          to={`/tournaments/${match.tournament.id}/matches/${match.id}/live`}
-          className="inline-flex min-h-10 items-center rounded-lg bg-gradient-to-r from-[#0F62FE] to-[#8A3FFC] px-4 text-xs font-bold text-white transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
-        >
-          Śledź mecz →
-        </Link>
-      </div>
-    </article>
-  );
+  return {
+    me: mySide === 1 ? match.player1 : match.player2,
+    opponent: mySide === 1 ? match.player2 : match.player1,
+    myScore: mySide === 1 ? match.score1 : match.score2,
+    opponentScore: mySide === 1 ? match.score2 : match.score1,
+  };
 }
 
-function TournamentCard({ tournament, matches }) {
-  const liveCount = matches.filter((match) => match.status === 'IN_PROGRESS').length;
-  const nextMatch = matches.find((match) => match.status === 'SCHEDULED');
+/* One match from the player's point of view, as a list row. */
+function MatchRow({ match, userId }) {
+  const { opponent, myScore, opponentScore } = sideOf(match, userId);
+  const live = match.status === 'IN_PROGRESS';
+  const finished = match.status === 'FINISHED';
+  const won = match.winnerId === userId;
+  const when = match.scheduledAt || match.tournament.date;
 
   return (
-    <article className="group rounded-2xl border border-white/[0.08] bg-[#111827]/80 p-4 transition duration-200 hover:-translate-y-0.5 hover:border-[#8A3FFC]/35 sm:p-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#81C7FF]">{SPORT_LABELS[tournament.sportType] || tournament.sportType}</p>
-          <h3 className="mt-2 truncate text-lg font-bold text-white">{tournament.title}</h3>
-        </div>
-        <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] font-semibold text-slate-300">
-          {TOURNAMENT_STATUS[tournament.status] || tournament.status}
-        </span>
-      </div>
-      <p className="mt-3 flex items-center gap-2 text-xs text-slate-400">
-        <span aria-hidden="true">◷</span>{dateLabel(tournament.date)}
-      </p>
-      {tournament.location && <p className="mt-1.5 truncate text-xs text-slate-500">⌖ {tournament.location}</p>}
-      <div className="mt-4 flex flex-wrap gap-2 text-[11px]">
-        <span className="rounded-lg bg-white/[0.04] px-2.5 py-1.5 text-slate-300">
-          {tournament._count.participants}/{tournament.maxParticipants} uczestników
-        </span>
-        <span className={`rounded-lg px-2.5 py-1.5 ${liveCount ? 'bg-emerald-300/10 text-emerald-200' : 'bg-white/[0.04] text-slate-400'}`}>
-          {liveCount ? `${liveCount} ${liveCount === 1 ? 'mecz na żywo' : 'mecze na żywo'}` : `${matches.length} ${matches.length === 1 ? 'mecz' : 'meczów'}`}
-        </span>
-      </div>
-      {nextMatch && (
-        <p className="mt-3 truncate text-xs text-slate-400">
-          Następny mecz · Runda {nextMatch.round}{nextMatch.groupKey ? ` · ${nextMatch.groupKey}` : ''}
+    <div className="row">
+      <span className="row-tile" data-tone={live ? 'live' : won ? 'accent' : undefined}>
+        <Icon name={live ? 'bolt' : won ? 'trophy' : finished ? 'check' : 'clock'} size={19} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="row-title"><span className="font-normal text-muted">vs</span> {opponent?.name || 'Oczekiwanie na awans'}</p>
+        <p className="row-meta">
+          <Link to={`/tournaments/${match.tournament.id}`} className="hover:text-ink hover:underline">{match.tournament.title}</Link>
+          {' · '}Runda {match.round}{match.groupKey ? ` · ${match.groupKey}` : ''}{match.court ? ` · ${match.court}` : ''}
         </p>
-      )}
+      </div>
+      <div className="row-end hidden sm:block">
+        {match.status === 'SCHEDULED'
+          ? <p className="text-sm font-semibold text-ink">{formatTime(when)}</p>
+          : <p className={`num text-2xl ${live ? '!text-live' : ''}`}>{myScore ?? 0}:{opponentScore ?? 0}</p>}
+        <p className="text-xs text-muted">
+          {live ? 'trwa' : finished ? (match.winnerId ? (won ? 'wygrana' : 'porażka') : 'koniec') : formatDate(when, { day: 'numeric', month: 'short' }, 'bez terminu')}
+        </p>
+      </div>
       <Link
-        to={`/tournaments/${tournament.id}`}
-        className="mt-5 inline-flex min-h-10 w-full items-center justify-center rounded-xl border border-white/10 px-4 text-xs font-bold text-slate-200 transition group-hover:border-[#8A3FFC]/30 group-hover:bg-white/[0.03] hover:text-white"
+        to={`/tournaments/${match.tournament.id}/matches/${match.id}/live`}
+        className="row-btn"
+        data-tone={live ? 'live' : 'ghost'}
+        aria-label={`${live ? 'Oglądaj na żywo' : 'Śledź mecz'}: vs ${opponent?.name || 'przeciwnik'}`}
       >
-        Otwórz wydarzenie →
+        {live ? 'Oglądaj' : 'Śledź'}
       </Link>
-    </article>
+    </div>
   );
 }
 
@@ -175,6 +83,8 @@ export default function PlayerDashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [connected, setConnected] = useState(false);
+
+  useTour('player', TOUR, { auto: true, ready: !loading && tournaments.length > 0 });
 
   const loadDashboard = useCallback(async (showRefreshing = false) => {
     if (showRefreshing) setRefreshing(true);
@@ -221,6 +131,8 @@ export default function PlayerDashboard() {
   const liveCount = matches.filter((match) => match.status === 'IN_PROGRESS').length;
   const upcomingCount = matches.filter((match) => match.status === 'SCHEDULED').length;
   const finishedCount = matches.filter((match) => match.status === 'FINISHED').length;
+  const wins = matches.filter((match) => match.status === 'FINISHED' && match.winnerId === user.id).length;
+  const losses = matches.filter((match) => match.status === 'FINISHED' && match.winnerId && match.winnerId !== user.id).length;
   const nextMatch = [...matches]
     .filter((match) => ['SCHEDULED', 'IN_PROGRESS'].includes(match.status))
     .sort((first, second) => {
@@ -237,147 +149,234 @@ export default function PlayerDashboard() {
     });
     return grouped;
   }, [matches]);
+  const nextIsLive = nextMatch?.status === 'IN_PROGRESS';
+  const total = matches.length || 1;
+  const summary = [
+    { id: 'SCHEDULED', icon: 'calendar', label: 'Nadchodzące', meta: 'Mecze z harmonogramu', value: upcomingCount, percent: (upcomingCount / total) * 100 },
+    { id: 'IN_PROGRESS', icon: 'bolt', tone: liveCount ? 'live' : undefined, label: 'Na żywo', meta: 'Trwające teraz', value: liveCount, percent: (liveCount / total) * 100 },
+    { id: 'FINISHED', icon: 'check', label: 'Zakończone', meta: 'Dotychczasowe wyniki', value: finishedCount, percent: (finishedCount / total) * 100 },
+    { id: 'WINS', icon: 'trophy', tone: 'accent', label: 'Wygrane', meta: finishedCount ? `${Math.round((wins / finishedCount) * 100)}% skuteczności` : 'Jeszcze bez wyników', value: wins, percent: finishedCount ? (wins / finishedCount) * 100 : 0 },
+  ];
+
+  function showMatches(nextFilter) {
+    setFilter(nextFilter);
+    scrollToTarget('#terminarz');
+  }
 
   return (
-    <main className="player-dashboard min-h-[calc(100vh-5rem)] bg-[#090D16] px-4 py-8 text-white sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-6xl">
-        <header className="relative mb-6 overflow-hidden rounded-3xl border border-[#0F62FE]/20 bg-gradient-to-br from-[#0F62FE]/15 via-[#111827] to-[#8A3FFC]/15 p-6 sm:p-8">
-          <div className="pointer-events-none absolute -right-12 -top-16 h-56 w-56 rounded-full bg-[#8A3FFC]/15 blur-3xl" aria-hidden="true" />
-          <div className="relative flex flex-wrap items-end justify-between gap-5">
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#81C7FF]">Panel zawodnika</p>
-              <h1 className="mt-2 text-3xl font-black tracking-tight sm:text-4xl">Co przed Tobą?</h1>
-              <p className="mt-2 max-w-xl text-sm text-slate-400">
-                Cześć{user?.name ? `, ${user.name}` : ''}! Tutaj znajdziesz swoje zapisy, najbliższy mecz i aktualne wyniki.
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-3">
+    <main className="page">
+      <div className="shell">
+        <PageHeader
+          eyebrow="Panel zawodnika"
+          title="Co przed Tobą?"
+          actions={(
+            <>
               {tournaments.length > 0 && (
-                <span className={`inline-flex items-center gap-2 rounded-full px-3 py-2 text-[10px] font-bold ${connected ? 'bg-emerald-300/10 text-emerald-200' : 'bg-white/[0.05] text-slate-400'}`}>
-                  <span className={`h-2 w-2 rounded-full ${connected ? 'animate-pulse bg-emerald-300' : 'bg-slate-500'}`} aria-hidden="true" />
-                  {connected ? 'Wyniki aktualizowane na żywo' : 'Łączenie z wynikami'}
+                <span className="soft-chip" title={connected ? 'Wyniki aktualizują się same' : 'Łączenie z wynikami na żywo'}>
+                  <Icon name={connected ? 'wifi' : 'wifi-off'} size={14} className={connected ? 'text-ok' : 'text-muted'} />
+                  {connected ? 'Na żywo' : 'Łączenie…'}
                 </span>
               )}
-              <button
-                type="button"
-                onClick={() => { void loadDashboard(true); }}
-                disabled={refreshing}
-                className="min-h-11 rounded-xl border border-white/10 bg-white/[0.04] px-4 text-xs font-bold text-white transition hover:bg-white/[0.08] disabled:opacity-50"
-              >
-                {refreshing ? 'Odświeżanie…' : '↻ Odśwież'}
+              <button type="button" onClick={() => { void loadDashboard(true); }} disabled={refreshing} className="icon-btn rounded-full" aria-label={refreshing ? 'Odświeżanie' : 'Odśwież'} title="Odśwież">
+                <Icon name="refresh" size={18} className={refreshing ? 'spin' : ''} />
               </button>
-            </div>
-          </div>
-        </header>
+              <Link to="/tournaments" className="btn btn-solid rounded-full"><Icon name="search" size={17} /> Znajdź turniej</Link>
+            </>
+          )}
+        >
+          Cześć{user?.name ? `, ${user.name}` : ''}! Twoje zapisy, najbliższy mecz i wyniki — w jednym miejscu.
+        </PageHeader>
 
         {error && (
-          <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-300/20 bg-rose-300/[0.06] px-4 py-3 text-sm text-rose-100" role="alert">
-            <span>{error}</span>
-            <button type="button" onClick={() => { void loadDashboard(true); }} className="font-bold underline underline-offset-4">Spróbuj ponownie</button>
-          </div>
+          <Notice
+            tone="danger"
+            className="mb-6"
+            action={<button type="button" onClick={() => { void loadDashboard(true); }} className="btn btn-ghost btn-sm shrink-0">Spróbuj ponownie</button>}
+          >
+            {error}
+          </Notice>
         )}
 
         {loading ? (
-          <div className="grid min-h-72 place-items-center text-sm text-slate-400" role="status">Ładowanie Twojego panelu…</div>
+          <div className="bento lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]" aria-label="Ładowanie Twojego panelu" role="status">
+            {[0, 1, 2, 3].map((item) => <div key={item} className="skeleton h-72 !rounded-[24px]" />)}
+          </div>
+        ) : tournaments.length === 0 ? (
+          <Reveal>
+            <EmptyState
+              icon="search"
+              title="Zacznij od zapisu na wydarzenie"
+              action={<Link to="/tournaments" className="btn btn-primary btn-lg">Przeglądaj wydarzenia <Arrow /></Link>}
+            >
+              Nie masz jeszcze żadnych zgłoszeń. Wybierz turniej, kliknij „Zapisz się”, a Twoje mecze i wyniki pojawią się tutaj automatycznie.
+            </EmptyState>
+          </Reveal>
         ) : (
-          <>
-            {nextMatch && (
-              <section className="player-next-match mb-8" aria-labelledby="next-match-heading">
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#81C7FF]">
-                    {nextMatch.status === 'IN_PROGRESS' ? 'Mecz trwa' : 'Najbliższy mecz'}
-                  </p>
-                  <h2 id="next-match-heading" className="mt-2 text-2xl font-bold tracking-tight text-white">
-                    {nextMatch.tournament.title}
-                  </h2>
-                  <p className="mt-2 text-sm text-slate-300">
-                    {dateLabel(nextMatch.scheduledAt || nextMatch.tournament.date)}
-                    {nextMatch.tournament.location ? ` · ${nextMatch.tournament.location}` : ''}
-                    {nextMatch.court ? ` · ${nextMatch.court}` : ''}
-                  </p>
-                  <p className="mt-2 text-sm text-slate-400">
-                    Przeciwnik: {nextMatch.player1Id === user.id
-                      ? nextMatch.player2?.name || 'Oczekiwanie na awans'
-                      : nextMatch.player1?.name || 'Oczekiwanie na awans'}
-                  </p>
+          <div className="bento">
+            <Reveal stagger={0.1} className="bento lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
+              <Panel
+                icon={nextIsLive ? 'bolt' : 'calendar'}
+                title={nextMatch ? (nextIsLive ? 'Mecz trwa' : 'Najbliższy mecz') : 'Najbliższy mecz'}
+                subtitle={nextMatch ? nextMatch.tournament.title : 'Harmonogram w przygotowaniu'}
+                action={nextMatch && (nextIsLive ? <LiveChip /> : <span className="soft-chip">Runda {nextMatch.round}</span>)}
+                className={nextIsLive ? '!border-live' : ''}
+                data-tour="player-next"
+              >
+                <div className="panel-body flex flex-1 flex-col">
+                  <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-5">
+                    <div className="min-w-0 flex-1">
+                      {nextMatch ? (
+                        <>
+                          <p className="text-sm font-semibold text-muted">Twój przeciwnik</p>
+                          <h2 className="display mt-1 break-words text-[clamp(2.4rem,5.4vw,4rem)]">
+                            {sideOf(nextMatch, user.id).opponent?.name || 'Oczekiwanie na awans'}
+                          </h2>
+                          <ul className="mt-4 grid gap-1.5 text-[0.9375rem] text-body">
+                            <li className="flex items-center gap-2"><Icon name="calendar" size={17} className="shrink-0 text-muted" />{formatDateTime(nextMatch.scheduledAt || nextMatch.tournament.date)}</li>
+                            {(nextMatch.tournament.location || nextMatch.court) && (
+                              <li className="flex items-center gap-2">
+                                <Icon name="pin" size={17} className="shrink-0 text-muted" />
+                                {[nextMatch.tournament.location, nextMatch.court].filter(Boolean).join(' · ')}
+                              </li>
+                            )}
+                          </ul>
+                        </>
+                      ) : (
+                        <p className="max-w-md text-[0.9375rem] text-body">
+                          Jesteś zapisany, ale harmonogram jeszcze nie powstał. Gdy organizator przypisze Cię do meczu, pojawi się on właśnie tutaj.
+                        </p>
+                      )}
+                    </div>
+                    <div className="rounded-2xl bg-sunk px-5 py-4 text-center">
+                      <p className="text-xs font-semibold text-muted">Bilans</p>
+                      <p className="num mt-1 text-5xl" aria-label={`${wins} ${plural(wins, 'wygrana', 'wygrane', 'wygranych')}, ${losses} ${plural(losses, 'porażka', 'porażki', 'porażek')}`}>
+                        {wins}<span className="text-muted">–</span>{losses}
+                      </p>
+                      <p className="mono mt-1 text-[0.6875rem] uppercase tracking-[0.1em] text-muted">W – P</p>
+                    </div>
+                  </div>
+                  <div className="panel-actions mt-auto pt-7">
+                    {nextMatch && nextIsLive && (
+                      <Link to={`/tournaments/${nextMatch.tournament.id}/matches/${nextMatch.id}/live`} className="btn btn-primary">
+                        <Icon name="play" size={16} /> Oglądaj na żywo
+                      </Link>
+                    )}
+                    {nextMatch ? (
+                      <Link to={`/tournaments/${nextMatch.tournament.id}`} className={`btn ${nextIsLive ? 'btn-ghost' : 'btn-solid'}`}>
+                        <Icon name="bracket" size={17} /> Zobacz drabinkę
+                      </Link>
+                    ) : (
+                      <Link to="/tournaments" className="btn btn-solid"><Icon name="search" size={17} /> Przeglądaj wydarzenia</Link>
+                    )}
+                    <button type="button" onClick={() => showMatches('ALL')} className="btn btn-ghost"><Icon name="list" size={17} /> Terminarz</button>
+                  </div>
                 </div>
-                <Link to={`/tournaments/${nextMatch.tournament.id}`} className="primary-action">
-                  Zobacz drabinkę <span aria-hidden="true">→</span>
-                </Link>
-              </section>
-            )}
-            <section className="mb-8 grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Podsumowanie">
-              <MetricCard label="Moje wydarzenia" value={tournaments.length} detail="Wszystkie Twoje zgłoszenia" accent="border-blue-300/15 text-blue-300" />
-              <MetricCard label="Nadchodzące mecze" value={upcomingCount} detail="Mecze z harmonogramu" accent="border-cyan-300/15 text-cyan-300" />
-              <MetricCard label="Mecze na żywo" value={liveCount} detail="Trwające teraz spotkania" accent="border-emerald-300/15 text-emerald-300" />
-              <MetricCard label="Zakończone mecze" value={finishedCount} detail="Sprawdź dotychczasowe wyniki" accent="border-violet-300/15 text-violet-300" />
-            </section>
+              </Panel>
 
-            <section className="mb-9">
-              <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Twoje zgłoszenia</p>
-                  <h2 className="mt-1 text-xl font-bold">Wydarzenia <span className="text-slate-500">({tournaments.length})</span></h2>
+              <Panel
+                icon="trophy"
+                title="Moje karnety"
+                subtitle="Wydarzenia, na które jesteś zapisany"
+                action={<Link to="/tournaments" className="soft-chip">Znajdź kolejne <Icon name="arrow-right" size={14} /></Link>}
+                data-tour="player-events"
+              >
+                <div className="pt-4">
+                  <PassRail label="Twoje wydarzenia">
+                    {tournaments.map((tournament, index) => {
+                      const tournamentMatches = matchesByTournament.get(tournament.id) || [];
+                      const live = tournamentMatches.some((match) => match.status === 'IN_PROGRESS');
+                      return (
+                        <div key={tournament.id} role="listitem" className="flex">
+                          <EventPass
+                            to={`/tournaments/${tournament.id}`}
+                            label={`Otwórz wydarzenie ${tournament.title}`}
+                            index={index}
+                            sport={tournament.sportType}
+                            title={tournament.title}
+                            live={live}
+                            tag={live ? 'Na żywo' : TOURNAMENT_STATUS[tournament.status]?.label || tournament.status}
+                            date={tournament.date}
+                            facts={[
+                              ['Moje mecze', tournamentMatches.length],
+                              ['Miejsce', tournament.location || 'Do ustalenia'],
+                            ]}
+                          />
+                        </div>
+                      );
+                    })}
+                    <div role="listitem" className="flex">
+                      <PassAdd to="/tournaments">Zapisz się na kolejne</PassAdd>
+                    </div>
+                  </PassRail>
                 </div>
-                <Link to="/tournaments" className="text-xs font-semibold text-[#81C7FF] transition hover:text-white">Znajdź wydarzenie →</Link>
-              </div>
-              {tournaments.length ? (
-                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                  {tournaments.map((tournament) => (
-                    <TournamentCard key={tournament.id} tournament={tournament} matches={matchesByTournament.get(tournament.id) || []} />
-                  ))}
-                </div>
-              ) : (
-                <div className="rounded-3xl border border-dashed border-white/10 bg-white/[0.02] px-6 py-12 text-center">
-                  <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-[#0F62FE]/20 to-[#8A3FFC]/20 text-2xl" aria-hidden="true">✦</div>
-                  <h3 className="mt-4 text-lg font-bold">Nie masz jeszcze zgłoszeń</h3>
-                  <p className="mx-auto mt-2 max-w-md text-sm text-slate-400">Przejrzyj dostępne wydarzenia i dołącz do turnieju, aby śledzić tutaj swoje mecze.</p>
-                  <Link to="/tournaments" className="mt-5 inline-flex min-h-11 items-center rounded-xl bg-gradient-to-r from-[#0F62FE] to-[#8A3FFC] px-5 text-sm font-bold text-white transition hover:brightness-110">
-                    Przeglądaj wydarzenia
-                  </Link>
-                </div>
-              )}
-            </section>
+                <PanelStats
+                  items={[
+                    ['Wydarzenia', tournaments.length],
+                    ['Nadchodzące mecze', upcomingCount],
+                    ['Na żywo', liveCount, liveCount ? 'live' : undefined],
+                  ]}
+                />
+              </Panel>
+            </Reveal>
 
-            <section>
-              <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Twój terminarz</p>
-                  <h2 className="mt-1 text-xl font-bold">Mecze <span className="text-slate-500">({matches.length})</span></h2>
+            <Reveal stagger={0.1} className="bento lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
+              <Panel icon="grid" title="Podsumowanie" subtitle="Twoje mecze w liczbach" data-tour="player-stats">
+                <div className="panel-body">
+                  <div className="rows">
+                    {summary.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => showMatches(item.id === 'WINS' ? 'FINISHED' : item.id)}
+                        className="row"
+                      >
+                        <span className="row-tile" data-tone={item.tone}><Icon name={item.icon} size={19} /></span>
+                        <span className="min-w-0 flex-1">
+                          <span className="row-title block">{item.label}</span>
+                          <span className="row-meta block">{item.meta}</span>
+                        </span>
+                        <Meter value={item.percent} label={`${item.label}: ${item.value}`} className="hidden w-20 sm:block md:w-28" />
+                        <span className="num row-end w-10 text-2xl">{item.value}</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
-              <nav aria-label="Filtruj mecze" className="mb-4 flex gap-2 overflow-x-auto pb-1">
-                {MATCH_FILTERS.map((item) => {
-                  const count = item.id === 'ALL' ? matches.length : matches.filter((match) => match.status === item.id).length;
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      aria-pressed={filter === item.id}
-                      onClick={() => setFilter(item.id)}
-                      className={`min-h-10 shrink-0 rounded-xl border px-3 text-xs font-semibold transition ${filter === item.id ? 'border-[#0F62FE]/50 bg-[#0F62FE]/15 text-white' : 'border-white/[0.07] bg-[#111827]/60 text-slate-400 hover:bg-white/[0.05] hover:text-white'}`}
-                    >
-                      {item.label} <span className="ml-1 opacity-70">{count}</span>
-                    </button>
-                  );
-                })}
-              </nav>
-              {filteredMatches.length ? (
-                <div className="grid gap-3 lg:grid-cols-2">
-                  {filteredMatches.map((match) => <MatchCard key={match.id} match={match} userId={user.id} />)}
+              </Panel>
+
+              <Panel
+                id="terminarz"
+                icon="list"
+                title="Terminarz"
+                subtitle={`${matches.length} ${plural(matches.length, 'mecz', 'mecze', 'meczów')} we wszystkich wydarzeniach`}
+                data-tour="player-matches"
+              >
+                <div className="panel-body">
+                  <div role="group" aria-label="Filtruj mecze" className="-mx-1 mb-2 flex gap-2 overflow-x-auto px-1 pb-1">
+                    {MATCH_FILTERS.map((item) => {
+                      const count = item.id === 'ALL' ? matches.length : matches.filter((match) => match.status === item.id).length;
+                      return (
+                        <button key={item.id} type="button" aria-pressed={filter === item.id} onClick={() => setFilter(item.id)} className="pill">
+                          {item.label} <span className="pill-count">{count}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {filteredMatches.length ? (
+                    <Reveal key={filter} stagger={0.05} y={12} className="rows">
+                      {filteredMatches.map((match) => <MatchRow key={match.id} match={match} userId={user.id} />)}
+                    </Reveal>
+                  ) : matches.length ? (
+                    <p className="well mt-3 p-6 text-center text-sm text-muted">Brak meczów w wybranej kategorii.</p>
+                  ) : (
+                    <div className="well mt-3 p-6 text-center">
+                      <p className="font-semibold text-ink">Harmonogram nie jest jeszcze dostępny</p>
+                      <p className="mt-2 text-sm text-muted">Gdy organizator przypisze Cię do meczu, spotkanie i wynik pojawią się tutaj.</p>
+                    </div>
+                  )}
                 </div>
-              ) : matches.length ? (
-                <div className="rounded-2xl border border-dashed border-white/10 p-9 text-center text-sm text-slate-400">
-                  Brak meczów w wybranej kategorii.
-                </div>
-              ) : (
-                <div className="rounded-2xl border border-dashed border-white/10 p-9 text-center">
-                  <p className="font-semibold text-slate-300">Harmonogram nie jest jeszcze dostępny</p>
-                  <p className="mt-2 text-sm text-slate-500">Gdy organizator przypisze Cię do meczu, spotkanie i wynik pojawią się tutaj.</p>
-                </div>
-              )}
-            </section>
-          </>
+              </Panel>
+            </Reveal>
+          </div>
         )}
       </div>
     </main>

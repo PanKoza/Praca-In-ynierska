@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import AuthLayout from '../components/AuthLayout';
+import { Arrow, Notice } from '../components/ui';
 
 export default function Login() {
   const { login } = useAuth();
@@ -36,58 +38,57 @@ export default function Login() {
   }
 
   return (
-    <div className="auth-page min-h-[calc(100vh-4rem)] bg-slate-950 flex items-center justify-center px-4">
-      <div className="w-full max-w-md">
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8">
-          <h1 className="text-2xl font-bold text-white mb-1">Zaloguj się</h1>
-          <p className="text-slate-400 text-sm mb-6">
-            Nie masz konta?{' '}
-            <Link to="/register" state={location.state} className="text-indigo-400 hover:text-indigo-300">
-              Zarejestruj się
-            </Link>
-          </p>
+    <AuthLayout
+      eyebrow="Logowanie"
+      title="Wracasz do gry"
+      lead={(
+        <>
+          Nie masz konta?{' '}
+          <Link to="/register" state={location.state} className="link">Załóż je w minutę</Link>
+        </>
+      )}
+      posterTitle={<>Twoje mecze<br />czekają.</>}
+      posterPoints={['Najbliższy mecz zawsze na górze panelu', 'Wyniki aktualizowane na żywo', 'Wszystkie zapisy w jednym miejscu']}
+    >
+      {location.state?.autoJoinTournamentId && (
+        <Notice className="mb-5">Po zalogowaniu od razu zapiszemy Cię na wybrane wydarzenie.</Notice>
+      )}
+      {error && <Notice tone="danger" className="mb-5">{error}</Notice>}
 
-          {error && (
-            <div className="bg-red-900/40 border border-red-700 text-red-300 text-sm rounded-lg px-4 py-3 mb-4">
-              {error}
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-1">Email</label>
-              <input
-                type="email"
-                name="email"
-                value={form.email}
-                onChange={handleChange}
-                required
-                className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                placeholder="jan@example.com"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-1">Hasło</label>
-              <input
-                type="password"
-                name="password"
-                value={form.password}
-                onChange={handleChange}
-                required
-                className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                placeholder="••••••••"
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-semibold py-2.5 rounded-lg transition-colors"
-            >
-              {loading ? 'Logowanie...' : 'Zaloguj się'}
-            </button>
-          </form>
+      <form onSubmit={handleSubmit} className="grid gap-5">
+        <div className="auth-rise">
+          <label className="label" htmlFor="login-email">Adres e-mail</label>
+          <input
+            id="login-email"
+            type="email"
+            name="email"
+            value={form.email}
+            onChange={handleChange}
+            required
+            autoComplete="email"
+            autoFocus
+            className="input"
+            placeholder="jan@example.com"
+          />
         </div>
-      </div>
-    </div>
+        <div className="auth-rise">
+          <label className="label" htmlFor="login-password">Hasło</label>
+          <input
+            id="login-password"
+            type="password"
+            name="password"
+            value={form.password}
+            onChange={handleChange}
+            required
+            autoComplete="current-password"
+            className="input"
+            placeholder="••••••••"
+          />
+        </div>
+        <button type="submit" disabled={loading} className="btn btn-primary btn-lg btn-block auth-rise">
+          {loading ? 'Logowanie…' : 'Zaloguj się'} {!loading && <Arrow />}
+        </button>
+      </form>
+    </AuthLayout>
   );
 }

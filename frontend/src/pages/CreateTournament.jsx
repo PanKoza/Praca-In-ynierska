@@ -1,6 +1,11 @@
 import { cloneElement, useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../api/axios';
+import { gsap, prefersReducedMotion, useGSAP } from '../lib/motion';
+import { dateParts, sportIcon } from '../lib/labels';
+import Icon from '../components/Icon';
+import { useTour } from '../components/Tour';
+import { Arrow, FullPageLoader, Notice, PageHeader } from '../components/ui';
 
 const STEPS = [
   { title: 'Informacje', description: 'Podstawowe dane' },
@@ -49,7 +54,18 @@ const INITIAL_FORM = {
   autoApprove: false,
 };
 
-const INPUT_CLASS = 'w-full rounded-xl border border-white/10 bg-[#090D16] px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-[#0F62FE] focus:ring-2 focus:ring-[#0F62FE]/20';
+const TIPS = [
+  'Nazwa, termin i miejsce to wszystko, czego uczestnicy potrzebują na start. Opis możesz uzupełnić później.',
+  'Nie wiesz, co wybrać? Pojedyncza eliminacja jest najszybsza, a „każdy z każdym” daje wszystkim najwięcej gry.',
+  'Przy zgłoszeniach drużynowych zespół zapisuje kapitan. Pole opłaty zostaw puste, jeśli udział jest bezpłatny.',
+  'Sprawdź podsumowanie. Po publikacji wydarzenie od razu pojawi się na liście, a zawodnicy będą mogli się zapisywać.',
+];
+
+const TOUR = [
+  { target: '[data-tour="wiz-steps"]', title: 'Cztery kroki do publikacji', body: 'Pasek pokazuje, gdzie jesteś. Do ukończonych kroków możesz wracać jednym kliknięciem.' },
+  { target: '[data-tour="wiz-save"]', title: 'Nic nie przepadnie', body: 'Kreator zapisuje szkic sam, po każdej zmianie. Możesz zamknąć stronę i dokończyć później.' },
+  { target: '[data-tour="wiz-nav"]', title: 'Idź dalej, gdy będziesz gotowy', body: 'Przycisk „Dalej” sprawdzi wymagane pola i podpowie, co poprawić. Na końcu czeka „Opublikuj”.' },
+];
 
 function localDraftKey(id) {
   return `tourniDesk.eventWizard.${id}`;
@@ -113,6 +129,20 @@ export default function CreateTournament() {
   const queue = useRef(Promise.resolve());
   const hydrated = useRef(false);
   const draftRequest = useRef(null);
+  const rootRef = useRef(null);
+  const previousStep = useRef(1);
+
+  useTour('wizard', TOUR, { auto: true, ready: !loading });
+
+  /* Each step slides in from the direction of travel, so going back feels like going back. */
+  useGSAP(() => {
+    if (loading || prefersReducedMotion()) return;
+    const direction = step >= previousStep.current ? 1 : -1;
+    previousStep.current = step;
+    gsap.fromTo('.wizard-step', { autoAlpha: 0, x: 40 * direction }, { autoAlpha: 1, x: 0, duration: 0.55, ease: 'expo.out', clearProps: 'transform,opacity,visibility' });
+    gsap.fromTo('.wizard-step > div > *', { autoAlpha: 0, y: 14 }, { autoAlpha: 1, y: 0, duration: 0.5, ease: 'power3.out', stagger: 0.04, clearProps: 'transform,opacity,visibility' });
+    gsap.fromTo('.wizard-tip', { autoAlpha: 0, y: 8 }, { autoAlpha: 1, y: 0, duration: 0.45, ease: 'power3.out' });
+  }, { dependencies: [step, loading], scope: rootRef });
 
   const reportSaveError = useCallback((saveError) => {
     setError(saveError.response?.data?.message || 'Nie udało się zapisać szkicu. Dane pozostają zapisane lokalnie.');
@@ -306,295 +336,373 @@ export default function CreateTournament() {
     }
   }
 
-  if (loading) {
-    return <main className="flex min-h-[70vh] items-center justify-center text-slate-300" aria-live="polite">Przygotowuję kreator…</main>;
-  }
+  if (loading) return <FullPageLoader label="Przygotowuję kreator…" />;
+
+  const sportName = SPORTS.find(([value]) => value === form.sportType)?.[1] || form.sportType;
+  const formatName = FORMATS.find(([value]) => value === form.format)?.[1] || form.format;
+  const previewDate = dateParts(form.date);
+  const capacityNumber = Number(form.maxParticipants);
 
   return (
-    <main className="event-wizard min-h-[calc(100vh-4rem)] bg-[#090D16] px-4 py-10 text-white sm:px-6">
-      <div className="mx-auto max-w-5xl">
-        <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.24em] text-[#8A3FFC]">Kreator wydarzenia · organizator</p>
-            <h1 className="text-3xl font-extrabold tracking-tight sm:text-4xl">Stwórz wydarzenie</h1>
-            <p className="mt-2 text-sm text-slate-400">Wykonaj cztery krótkie kroki. Postęp zapisuje się automatycznie i możesz wrócić później.</p>
-          </div>
-          <div className="flex items-center gap-2 text-xs text-slate-400" aria-live="polite">
-            <span className={`h-2 w-2 rounded-full ${saving ? 'animate-pulse bg-amber-400' : 'bg-emerald-400'}`} />
-            {saving ? 'Zapisywanie…' : 'Zmiany zapisane'}
-          </div>
-        </div>
-
-        <nav aria-label="Postęp kreatora" className="mb-6 rounded-2xl border border-white/10 bg-[#121826] p-4 sm:p-6">
-          <ol className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {STEPS.map((item, index) => {
-              const itemStep = index + 1;
-              const complete = itemStep < step;
-              return (
-                <li key={item.title}>
-                  <button
-                    id={`wizard-step-${itemStep}`}
-                    type="button"
-                    aria-current={itemStep === step ? 'step' : undefined}
-                    aria-label={`Krok ${itemStep}: ${item.title}${errors[Object.keys(errors)[0]] && itemStep < step ? ', zawiera błąd' : ''}`}
-                    onClick={() => moveToStep(itemStep)}
-                    onKeyDown={(event) => stepperKeyDown(event, index)}
-                    disabled={itemStep > step}
-                    className={`flex w-full items-center gap-3 rounded-xl p-2 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0F62FE] disabled:cursor-default ${
-                      itemStep === step ? 'bg-[#0F62FE]/10' : 'hover:bg-white/[0.04]'
-                    }`}
-                  >
-                    <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-sm font-bold ${
-                      complete ? 'bg-[#8A3FFC] text-white' :
-                        itemStep === step ? 'bg-[#0F62FE] text-white' : 'bg-white/10 text-slate-400'
-                    }`}>{complete ? '✓' : itemStep}</span>
-                    <span>
-                      <span className={`block text-sm font-semibold ${itemStep === step ? 'text-white' : 'text-slate-300'}`}>{item.title}</span>
-                      <span className="block text-xs text-slate-500">{item.description}</span>
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ol>
-          <div className="mt-5 h-1.5 overflow-hidden rounded-full bg-white/10" role="progressbar" aria-label="Ukończenie kreatora" aria-valuemin="0" aria-valuemax="4" aria-valuenow={step}>
-            <div className="h-full rounded-full bg-gradient-to-r from-[#0F62FE] to-[#8A3FFC] transition-all" style={{ width: `${step * 25}%` }} />
-          </div>
-        </nav>
-
-        <section className="rounded-2xl border border-white/10 bg-[#121826] p-5 shadow-2xl shadow-blue-950/20 sm:p-8" aria-labelledby="step-heading">
-          {error && <div className="mb-6 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200" role="alert">{error}</div>}
-          {message && <div className="mb-6 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200" role="status">{message}</div>}
-          <div className="mb-7">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#39B4FE]">Krok {step} z 4</p>
-            <h2 id="step-heading" className="mt-1 text-2xl font-bold">{STEPS[step - 1].title}</h2>
-          </div>
-
-          {step === 1 && (
-            <div className="grid gap-5 sm:grid-cols-2">
-              <Field name="title" label="Nazwa wydarzenia" error={errors.title} className="sm:col-span-2">
-                <input id="title" name="title" value={form.title} onChange={updateField} maxLength={120} required className={INPUT_CLASS} placeholder="np. TourniDesk Open 2026" />
-              </Field>
-              <Field name="description" label="Opis" error={errors.description} className="sm:col-span-2">
-                <textarea id="description" name="description" value={form.description} onChange={updateField} rows={3} maxLength={2000} className={INPUT_CLASS} placeholder="Opowiedz uczestnikom o wydarzeniu…" />
-              </Field>
-              <Field name="sportType" label="Dyscyplina" error={errors.sportType}>
-                <select id="sportType" name="sportType" value={form.sportType} onChange={updateField} className={INPUT_CLASS}>
-                  {SPORTS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                </select>
-              </Field>
-              <Field name="locationType" label="Rodzaj lokalizacji">
-                <select id="locationType" name="locationType" value={form.locationType} onChange={updateField} className={INPUT_CLASS}>
-                  <option value="PHYSICAL">Stacjonarna</option>
-                  <option value="ONLINE">Online</option>
-                  <option value="HYBRID">Hybrydowa</option>
-                </select>
-              </Field>
-              <Field name="date" label="Rozpoczęcie" error={errors.date}>
-                <input id="date" type="datetime-local" name="date" value={form.date} onChange={updateField} required className={INPUT_CLASS} />
-              </Field>
-              <Field name="endDate" label="Zakończenie (opcjonalnie)" error={errors.endDate}>
-                <input id="endDate" type="datetime-local" name="endDate" value={form.endDate} onChange={updateField} className={INPUT_CLASS} />
-              </Field>
-              <Field name="registrationDeadline" label="Zamknięcie zapisów (opcjonalnie)" error={errors.registrationDeadline}>
-                <input id="registrationDeadline" type="datetime-local" name="registrationDeadline" value={form.registrationDeadline} onChange={updateField} className={INPUT_CLASS} />
-              </Field>
-              <Field name="location" label={form.locationType === 'ONLINE' ? 'Platforma / link do wydarzenia' : 'Adres / lokalizacja'} error={errors.location} className="sm:col-span-2">
-                <input id="location" name="location" value={form.location} onChange={updateField} required className={INPUT_CLASS} placeholder={form.locationType === 'ONLINE' ? 'np. Discord, Steam…' : 'np. Hala sportowa, ul. Sportowa 1, Warszawa'} />
-              </Field>
-            </div>
+    <main className="page">
+      <div ref={rootRef} className="shell">
+        <PageHeader
+          eyebrow="Kreator wydarzenia"
+          title="Stwórz wydarzenie"
+          actions={(
+            <span className="chip !h-9 !px-3.5" data-tone={saving ? 'warn' : 'ok'} aria-live="polite" data-tour="wiz-save">
+              <Icon name={saving ? 'refresh' : 'check'} size={14} className={saving ? 'spin' : ''} />
+              {saving ? 'Zapisywanie…' : 'Zmiany zapisane'}
+            </span>
           )}
+        >
+          Cztery krótkie kroki. Postęp zapisuje się automatycznie — możesz przerwać i wrócić później.
+        </PageHeader>
 
-          {step === 2 && (
-            <div className="space-y-6">
-              <fieldset>
-                <legend className="mb-3 text-sm font-medium text-slate-200">Format rozgrywek</legend>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {FORMATS.map(([value, label, description]) => (
-                    <label key={value} className={`cursor-pointer rounded-xl border p-4 transition focus-within:ring-2 focus-within:ring-[#0F62FE] ${
-                      form.format === value ? 'border-[#0F62FE] bg-[#0F62FE]/10' : 'border-white/10 bg-[#090D16] hover:border-white/20'
-                    }`}>
-                      <input className="sr-only" type="radio" name="format" value={value} checked={form.format === value} onChange={updateField} />
-                      <span className="block text-sm font-semibold">{label}</span>
-                      <span className="mt-1 block text-xs text-slate-400">{description}</span>
-                    </label>
-                  ))}
+        <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
+          <div className="min-w-0">
+            <nav aria-label="Postęp kreatora" className="mb-6" data-tour="wiz-steps">
+              <div className="relative">
+                <div className="absolute left-[12.5%] right-[12.5%] top-[21px] hidden h-0.5 bg-line sm:block" aria-hidden="true">
+                  <div className="wizard-progress h-full origin-left bg-mark" style={{ transform: `scaleX(${(step - 1) / 3})`, transition: 'transform 700ms cubic-bezier(0.16, 1, 0.3, 1)' }} />
                 </div>
-                {errors.format && <p className="mt-1 text-xs text-red-300" role="alert">{errors.format}</p>}
-              </fieldset>
-              <div className="grid gap-5 sm:grid-cols-2">
-                <Field name="maxParticipants" label="Maksymalna liczba uczestników" error={errors.maxParticipants}>
-                  <input id="maxParticipants" type="number" name="maxParticipants" min="2" max="256" value={form.maxParticipants} onChange={updateField} required className={INPUT_CLASS} />
-                </Field>
-                <Field name="seeding" label="Rozstawienie" error={errors.seeding}>
-                  <select id="seeding" name="seeding" value={form.seeding} onChange={updateField} className={INPUT_CLASS}>
-                    <option value="RANDOM">Losowe</option>
-                    <option value="MANUAL">Ręczne</option>
-                    <option value="RANKED">Ranking / punkty</option>
-                  </select>
-                </Field>
+                <ol className="relative grid grid-cols-4 gap-2">
+                  {STEPS.map((item, index) => {
+                    const itemStep = index + 1;
+                    const complete = itemStep < step;
+                    const current = itemStep === step;
+                    return (
+                      <li key={item.title}>
+                        <button
+                          id={`wizard-step-${itemStep}`}
+                          type="button"
+                          aria-current={current ? 'step' : undefined}
+                          aria-label={`Krok ${itemStep}: ${item.title}${errors[Object.keys(errors)[0]] && itemStep < step ? ', zawiera błąd' : ''}`}
+                          onClick={() => moveToStep(itemStep)}
+                          onKeyDown={(event) => stepperKeyDown(event, index)}
+                          disabled={itemStep > step}
+                          className="group flex w-full flex-col items-center gap-2 rounded-[12px] px-1 py-1 text-center disabled:cursor-default"
+                        >
+                          <span className={`grid h-11 w-11 place-items-center rounded-full border-[1.5px] font-display text-xl font-extrabold transition-all duration-300 ${
+                            complete ? 'border-ink bg-ink text-bg group-hover:scale-105'
+                              : current ? 'scale-110 border-ink bg-accent text-accent-ink'
+                                : 'border-line-2 bg-bg text-muted'
+                          }`}
+                          >
+                            {complete ? <Icon name="check" size={19} strokeWidth={2.5} /> : itemStep}
+                          </span>
+                          <span className="min-w-0">
+                            <span className={`block font-display text-base font-bold uppercase leading-tight tracking-[0.03em] sm:text-lg ${current || complete ? 'text-ink' : 'text-muted'}`}>{item.title}</span>
+                            <span className="hidden text-xs text-muted sm:block">{item.description}</span>
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ol>
               </div>
-              <label className="flex items-start gap-3 rounded-xl border border-white/10 bg-[#090D16] p-4">
-                <input type="checkbox" name="allowByes" checked={form.allowByes} onChange={updateField} className="mt-1 accent-[#0F62FE]" />
-                <span>
-                  <span className="block text-sm font-medium">Dopuść wolne losy (BYE)</span>
-                  <span className="mt-1 block text-xs text-slate-400">Umożliwia limity inne niż potęgi dwójki; część uczestników przejdzie pierwszą rundę bez meczu.</span>
-                </span>
-              </label>
-            </div>
-          )}
+              <div className="sr-only" role="progressbar" aria-label="Ukończenie kreatora" aria-valuemin="0" aria-valuemax="4" aria-valuenow={step} />
+            </nav>
 
-          {step === 3 && (
-            <div className="space-y-6">
-              <fieldset>
-                <legend className="mb-3 text-sm font-medium text-slate-200">Zgłoszenia</legend>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {[
-                    ['TEAM', 'Drużynowe', 'Uczestnicy zgłaszają drużynę.'],
-                    ['INDIVIDUAL', 'Indywidualne', 'Każdy uczestnik zapisuje się osobno.'],
-                  ].map(([value, label, description]) => (
-                    <label key={value} className={`cursor-pointer rounded-xl border p-4 transition focus-within:ring-2 focus-within:ring-[#0F62FE] ${
-                      form.registrationType === value ? 'border-[#0F62FE] bg-[#0F62FE]/10' : 'border-white/10 bg-[#090D16] hover:border-white/20'
-                    }`}>
-                      <input className="sr-only" type="radio" name="registrationType" value={value} checked={form.registrationType === value} onChange={updateField} />
-                      <span className="block text-sm font-semibold">{label}</span>
-                      <span className="mt-1 block text-xs text-slate-400">{description}</span>
-                    </label>
-                  ))}
+            <section className="card card-pad" aria-labelledby="step-heading">
+              <div className="mb-7 flex items-end justify-between gap-4 border-b border-line pb-5">
+                <div>
+                  <p className="mono text-xs font-semibold uppercase tracking-[0.14em] text-muted">Krok {step} z 4</p>
+                  <h2 id="step-heading" className="h-section mt-1.5">{STEPS[step - 1].title}</h2>
                 </div>
-              </fieldset>
-              {form.registrationType === 'TEAM' && (
-                <div className="grid gap-5 sm:grid-cols-2">
-                  <Field name="minTeamSize" label="Minimalny skład drużyny" error={errors.minTeamSize}>
-                    <input id="minTeamSize" type="number" name="minTeamSize" min="1" max="100" value={form.minTeamSize} onChange={updateField} className={INPUT_CLASS} />
-                  </Field>
-                  <Field name="maxTeamSize" label="Maksymalny skład drużyny" error={errors.maxTeamSize}>
-                    <input id="maxTeamSize" type="number" name="maxTeamSize" min="1" max="100" value={form.maxTeamSize} onChange={updateField} className={INPUT_CLASS} />
-                  </Field>
-                </div>
-              )}
-              <div className="grid gap-5 sm:grid-cols-2">
-                <Field name="entryFee" label="Opłata wpisowa (opcjonalnie)" error={errors.entryFee}>
-                  <input id="entryFee" type="number" name="entryFee" min="0" step="0.01" value={form.entryFee} onChange={updateField} className={INPUT_CLASS} placeholder="0,00" />
-                </Field>
-                <Field name="currency" label="Waluta" error={errors.currency}>
-                  <select id="currency" name="currency" value={form.currency} onChange={updateField} disabled={!form.entryFee} className={INPUT_CLASS}>
-                    {['PLN', 'EUR', 'USD', 'GBP'].map((currency) => <option key={currency} value={currency}>{currency}</option>)}
-                  </select>
-                </Field>
+                <span className="num text-6xl text-line-2" aria-hidden="true">0{step}</span>
               </div>
-              <label className="flex items-start gap-3 rounded-xl border border-white/10 bg-[#090D16] p-4">
-                <input type="checkbox" name="autoApprove" checked={form.autoApprove} onChange={updateField} className="mt-1 accent-[#0F62FE]" />
-                <span>
-                  <span className="block text-sm font-medium">Automatycznie akceptuj zgłoszenia</span>
-                  <span className="mt-1 block text-xs text-slate-400">Nowe zgłoszenia będą zatwierdzane bez ręcznej weryfikacji organizatora.</span>
-                </span>
-              </label>
-            </div>
-          )}
 
-          {step === 4 && (
-            <div className="space-y-6">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <SummaryCard title="Wydarzenie">
-                  <SummaryRow label="Nazwa" value={form.title || '—'} />
-                  <SummaryRow label="Dyscyplina" value={SPORTS.find(([value]) => value === form.sportType)?.[1] || form.sportType} />
-                  <SummaryRow label="Termin" value={form.date ? new Date(form.date).toLocaleString('pl-PL') : '—'} />
-                  <SummaryRow label="Lokalizacja" value={form.location || '—'} />
-                </SummaryCard>
-                <SummaryCard title="Rozgrywki i zgłoszenia">
-                  <SummaryRow label="Format" value={FORMATS.find(([value]) => value === form.format)?.[1] || form.format} />
-                  <SummaryRow label="Limit" value={`${form.maxParticipants} uczestników`} />
-                  <SummaryRow label="Rozstawienie" value={{ RANDOM: 'Losowe', MANUAL: 'Ręczne', RANKED: 'Ranking / punkty' }[form.seeding]} />
-                  <SummaryRow label="Zgłoszenia" value={form.registrationType === 'TEAM' ? `Drużynowe (${form.minTeamSize}–${form.maxTeamSize})` : 'Indywidualne'} />
-                  <SummaryRow label="Opłata" value={form.entryFee ? `${Number(form.entryFee).toFixed(2)} ${form.currency}` : 'Brak'} />
-                </SummaryCard>
-              </div>
-              <div className="rounded-xl border border-white/10 bg-[#090D16] p-5">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <h3 className="font-semibold">Podgląd struktury meczów</h3>
-                    <p className="mt-1 text-xs text-slate-400">Szablon zostanie wygenerowany na podstawie wybranego formatu.</p>
-                  </div>
-                  {preview && <span className="rounded-full bg-[#8A3FFC]/15 px-3 py-1 text-xs font-semibold text-purple-200">{preview.matchCount} meczów</span>}
-                </div>
-                {preview?.groups && <p className="mt-4 text-sm text-slate-300">Faza grupowa: {preview.groups.join(', ')}</p>}
-                {preview?.byeCount > 0 && <p className="mt-2 text-xs text-slate-400">Wolne losy w drabince: {preview.byeCount}</p>}
-                {preview?.rounds?.length ? (
-                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                    {preview.rounds.slice(0, 4).map((round, index) => (
-                      <div key={`round-${index}`} className="rounded-lg border border-white/10 p-3">
-                        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[#39B4FE]">
-                          {preview.format === 'ROUND_ROBIN' ? `Mecze ligowe (${round.length})` : `Runda ${index + 1}`}
-                        </p>
-                        <ul className="space-y-1 text-xs text-slate-300">
-                          {round.slice(0, 3).map((match, matchIndex) => <li key={`${index}-${matchIndex}`}>{match.participants.join(' vs ')}</li>)}
-                          {round.length > 3 && <li className="text-slate-500">i {round.length - 3} kolejnych…</li>}
-                        </ul>
+              <div className="wizard-step">
+                {step === 1 && (
+                  <div className="grid gap-5 sm:grid-cols-2">
+                    <Field name="title" label="Nazwa wydarzenia" error={errors.title} className="sm:col-span-2">
+                      <input id="title" name="title" value={form.title} onChange={updateField} maxLength={120} required className="input" placeholder="np. TourniDesk Open 2026" />
+                    </Field>
+                    <fieldset className="sm:col-span-2">
+                      <legend className="label">Dyscyplina</legend>
+                      <div className="flex flex-wrap gap-2">
+                        {SPORTS.filter(([value]) => value !== 'OTHER' || form.sportType === 'OTHER').map(([value, label]) => (
+                          <label key={value} className="pill cursor-pointer">
+                            <input className="sr-only" type="radio" name="sportType" value={value} checked={form.sportType === value} onChange={updateField} />
+                            <Icon name={sportIcon(value)} size={17} />
+                            {label}
+                          </label>
+                        ))}
                       </div>
-                    ))}
-                    {preview.rounds.length > 4 && <p className="text-xs text-slate-500">… oraz {preview.rounds.length - 4} kolejnych rund</p>}
+                      {errors.sportType && <p className="error-text" role="alert">{errors.sportType}</p>}
+                    </fieldset>
+                    <Field name="date" label="Rozpoczęcie" error={errors.date}>
+                      <input id="date" type="datetime-local" name="date" value={form.date} onChange={updateField} required className="input" />
+                    </Field>
+                    <Field name="endDate" label="Zakończenie" optional error={errors.endDate}>
+                      <input id="endDate" type="datetime-local" name="endDate" value={form.endDate} onChange={updateField} className="input" />
+                    </Field>
+                    <Field name="registrationDeadline" label="Zamknięcie zapisów" optional error={errors.registrationDeadline} hint="Zostaw puste, jeśli zapisy trwają do rozpoczęcia.">
+                      <input id="registrationDeadline" type="datetime-local" name="registrationDeadline" value={form.registrationDeadline} onChange={updateField} className="input" />
+                    </Field>
+                    <Field name="locationType" label="Rodzaj lokalizacji">
+                      <select id="locationType" name="locationType" value={form.locationType} onChange={updateField} className="input">
+                        <option value="PHYSICAL">Stacjonarna</option>
+                        <option value="ONLINE">Online</option>
+                        <option value="HYBRID">Hybrydowa</option>
+                      </select>
+                    </Field>
+                    <Field name="location" label={form.locationType === 'ONLINE' ? 'Platforma / link do wydarzenia' : 'Adres / lokalizacja'} error={errors.location} className="sm:col-span-2">
+                      <input id="location" name="location" value={form.location} onChange={updateField} required className="input" placeholder={form.locationType === 'ONLINE' ? 'np. Discord, Steam…' : 'np. Hala sportowa, ul. Sportowa 1, Warszawa'} />
+                    </Field>
+                    <Field name="description" label="Opis" optional error={errors.description} className="sm:col-span-2">
+                      <textarea id="description" name="description" value={form.description} onChange={updateField} rows={3} maxLength={2000} className="input" placeholder="Opowiedz uczestnikom o wydarzeniu…" />
+                    </Field>
                   </div>
-                ) : <p className="mt-4 text-sm text-slate-400">Podgląd pojawi się po poprawnym uzupełnieniu wcześniejszych kroków.</p>}
-              </div>
-              <div className="rounded-xl border border-[#0F62FE]/20 bg-[#0F62FE]/5 p-4 text-sm text-slate-300">
-                Po publikacji wydarzenie będzie widoczne dla uczestników i otwarte na zapisy.
-              </div>
-            </div>
-          )}
+                )}
 
-          <div className="mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-6">
-            <button type="button" onClick={() => step > 1 ? moveToStep(step - 1) : navigate('/organizer')} className="rounded-xl px-4 py-3 text-sm font-medium text-slate-300 transition hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0F62FE]">
-              {step > 1 ? '← Wstecz' : 'Anuluj'}
-            </button>
-            <div className="flex flex-wrap gap-3">
-              <button type="button" onClick={saveForLater} disabled={!draftId || saving} className="rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-200 transition hover:bg-white/5 disabled:opacity-50">
-                Zapisz szkic
-              </button>
-              {step < 4 ? (
-                <button type="button" onClick={() => moveToStep(step + 1)} disabled={!draftId} className="rounded-xl bg-gradient-to-r from-[#0F62FE] to-[#8A3FFC] px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-950/30 transition hover:brightness-110 disabled:opacity-50">
-                  Dalej <span aria-hidden="true">→</span>
-                </button>
-              ) : (
-                <button type="button" onClick={publish} disabled={publishing || !draftId} className="rounded-xl bg-gradient-to-r from-[#0F62FE] to-[#8A3FFC] px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-950/30 transition hover:brightness-110 disabled:opacity-50">
-                  {publishing ? 'Publikowanie…' : 'Opublikuj wydarzenie'}
-                </button>
-              )}
-            </div>
+                {step === 2 && (
+                  <div className="grid gap-7">
+                    <fieldset>
+                      <legend className="label">Format rozgrywek</legend>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {FORMATS.map(([value, label, description]) => (
+                          <label key={value} className="choice">
+                            <input className="sr-only" type="radio" name="format" value={value} checked={form.format === value} onChange={updateField} />
+                            <span className="min-w-0 flex-1">
+                              <span className="block font-display text-xl font-bold uppercase leading-none tracking-[0.02em] text-ink">{label}</span>
+                              <span className="mt-1.5 block text-[0.8125rem] leading-snug text-muted">{description}</span>
+                            </span>
+                            <span className="choice-mark"><Icon name="check" size={14} strokeWidth={3} /></span>
+                          </label>
+                        ))}
+                      </div>
+                      {errors.format && <p className="error-text" role="alert">{errors.format}</p>}
+                    </fieldset>
+                    <div className="grid gap-5 sm:grid-cols-2">
+                      <div>
+                        <Field name="maxParticipants" label="Maksymalna liczba uczestników" error={errors.maxParticipants}>
+                          <input id="maxParticipants" type="number" name="maxParticipants" min="2" max="256" value={form.maxParticipants} onChange={updateField} required className="input" />
+                        </Field>
+                        <div className="mt-2.5 flex flex-wrap gap-2" role="group" aria-label="Szybki wybór limitu">
+                          {['8', '16', '32', '64'].map((preset) => (
+                            <button key={preset} type="button" className="pill !min-h-9 !px-3.5" aria-pressed={String(form.maxParticipants) === preset} onClick={() => updateField({ target: { name: 'maxParticipants', value: preset, type: 'number' } })}>
+                              {preset}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <Field name="seeding" label="Rozstawienie" error={errors.seeding} hint="Losowe sprawdza się najlepiej, gdy uczestnicy się nie znają.">
+                        <select id="seeding" name="seeding" value={form.seeding} onChange={updateField} className="input">
+                          <option value="RANDOM">Losowe</option>
+                          <option value="MANUAL">Ręczne</option>
+                          <option value="RANKED">Ranking / punkty</option>
+                        </select>
+                      </Field>
+                    </div>
+                    <label className="choice">
+                      <input type="checkbox" name="allowByes" checked={form.allowByes} onChange={updateField} className="sr-only" />
+                      <span className="choice-mark choice-mark-square"><Icon name="check" size={14} strokeWidth={3} /></span>
+                      <span>
+                        <span className="block font-semibold text-ink">Dopuść wolne losy (BYE)</span>
+                        <span className="mt-1 block text-[0.8125rem] leading-snug text-muted">Umożliwia limity inne niż potęgi dwójki; część uczestników przejdzie pierwszą rundę bez meczu.</span>
+                      </span>
+                    </label>
+                  </div>
+                )}
+
+                {step === 3 && (
+                  <div className="grid gap-7">
+                    <fieldset>
+                      <legend className="label">Zgłoszenia</legend>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {[
+                          ['TEAM', 'Drużynowe', 'Uczestnicy zgłaszają drużynę.', 'users'],
+                          ['INDIVIDUAL', 'Indywidualne', 'Każdy uczestnik zapisuje się osobno.', 'user'],
+                        ].map(([value, label, description, icon]) => (
+                          <label key={value} className="choice">
+                            <input className="sr-only" type="radio" name="registrationType" value={value} checked={form.registrationType === value} onChange={updateField} />
+                            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[10px] border border-line-2 bg-bg text-ink"><Icon name={icon} size={20} /></span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block font-display text-xl font-bold uppercase leading-none tracking-[0.02em] text-ink">{label}</span>
+                              <span className="mt-1.5 block text-[0.8125rem] leading-snug text-muted">{description}</span>
+                            </span>
+                            <span className="choice-mark"><Icon name="check" size={14} strokeWidth={3} /></span>
+                          </label>
+                        ))}
+                      </div>
+                    </fieldset>
+                    {form.registrationType === 'TEAM' && (
+                      <div className="grid gap-5 sm:grid-cols-2">
+                        <Field name="minTeamSize" label="Minimalny skład drużyny" error={errors.minTeamSize}>
+                          <input id="minTeamSize" type="number" name="minTeamSize" min="1" max="100" value={form.minTeamSize} onChange={updateField} className="input" />
+                        </Field>
+                        <Field name="maxTeamSize" label="Maksymalny skład drużyny" error={errors.maxTeamSize}>
+                          <input id="maxTeamSize" type="number" name="maxTeamSize" min="1" max="100" value={form.maxTeamSize} onChange={updateField} className="input" />
+                        </Field>
+                      </div>
+                    )}
+                    <div className="grid gap-5 sm:grid-cols-2">
+                      <Field name="entryFee" label="Opłata wpisowa" optional error={errors.entryFee} hint="Zostaw puste, jeśli udział jest bezpłatny.">
+                        <input id="entryFee" type="number" name="entryFee" min="0" step="0.01" value={form.entryFee} onChange={updateField} className="input" placeholder="0,00" />
+                      </Field>
+                      <Field name="currency" label="Waluta" error={errors.currency}>
+                        <select id="currency" name="currency" value={form.currency} onChange={updateField} disabled={!form.entryFee} className="input">
+                          {['PLN', 'EUR', 'USD', 'GBP'].map((currency) => <option key={currency} value={currency}>{currency}</option>)}
+                        </select>
+                      </Field>
+                    </div>
+                    <label className="choice">
+                      <input type="checkbox" name="autoApprove" checked={form.autoApprove} onChange={updateField} className="sr-only" />
+                      <span className="choice-mark choice-mark-square"><Icon name="check" size={14} strokeWidth={3} /></span>
+                      <span>
+                        <span className="block font-semibold text-ink">Automatycznie akceptuj zgłoszenia</span>
+                        <span className="mt-1 block text-[0.8125rem] leading-snug text-muted">Nowe zgłoszenia będą zatwierdzane bez ręcznej weryfikacji organizatora.</span>
+                      </span>
+                    </label>
+                  </div>
+                )}
+
+                {step === 4 && (
+                  <div className="grid gap-5">
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <SummaryCard title="Wydarzenie" onEdit={() => moveToStep(1)}>
+                        <SummaryRow label="Nazwa" value={form.title || '—'} />
+                        <SummaryRow label="Dyscyplina" value={sportName} />
+                        <SummaryRow label="Termin" value={form.date ? new Date(form.date).toLocaleString('pl-PL') : '—'} />
+                        <SummaryRow label="Lokalizacja" value={form.location || '—'} />
+                      </SummaryCard>
+                      <SummaryCard title="Rozgrywki i zgłoszenia" onEdit={() => moveToStep(2)}>
+                        <SummaryRow label="Format" value={formatName} />
+                        <SummaryRow label="Limit" value={`${form.maxParticipants} uczestników`} />
+                        <SummaryRow label="Rozstawienie" value={{ RANDOM: 'Losowe', MANUAL: 'Ręczne', RANKED: 'Ranking / punkty' }[form.seeding]} />
+                        <SummaryRow label="Zgłoszenia" value={form.registrationType === 'TEAM' ? `Drużynowe (${form.minTeamSize}–${form.maxTeamSize})` : 'Indywidualne'} />
+                        <SummaryRow label="Opłata" value={form.entryFee ? `${Number(form.entryFee).toFixed(2)} ${form.currency}` : 'Brak'} />
+                      </SummaryCard>
+                    </div>
+                    <div className="well p-5">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <h3 className="h-card">Podgląd struktury meczów</h3>
+                          <p className="mt-1.5 text-sm text-muted">Szablon zostanie wygenerowany na podstawie wybranego formatu.</p>
+                        </div>
+                        {preview && <span className="chip" data-tone="accent">{preview.matchCount} meczów</span>}
+                      </div>
+                      {preview?.groups && <p className="mt-4 text-sm text-ink">Faza grupowa: {preview.groups.join(', ')}</p>}
+                      {preview?.byeCount > 0 && <p className="mt-2 text-sm text-muted">Wolne losy w drabince: {preview.byeCount}</p>}
+                      {preview?.rounds?.length ? (
+                        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                          {preview.rounds.slice(0, 4).map((round, index) => (
+                            <div key={`round-${index}`} className="rounded-[10px] border border-line bg-surface p-3.5">
+                              <p className="mono mb-2 text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-muted">
+                                {preview.format === 'ROUND_ROBIN' ? `Mecze ligowe (${round.length})` : `Runda ${index + 1}`}
+                              </p>
+                              <ul className="grid gap-1 text-sm text-ink">
+                                {round.slice(0, 3).map((match, matchIndex) => <li key={`${index}-${matchIndex}`}>{match.participants.join(' vs ')}</li>)}
+                                {round.length > 3 && <li className="text-muted">i {round.length - 3} kolejnych…</li>}
+                              </ul>
+                            </div>
+                          ))}
+                          {preview.rounds.length > 4 && <p className="text-sm text-muted">… oraz {preview.rounds.length - 4} kolejnych rund</p>}
+                        </div>
+                      ) : <p className="mt-4 text-sm text-muted">Podgląd pojawi się po poprawnym uzupełnieniu wcześniejszych kroków.</p>}
+                    </div>
+                    <Notice>Po publikacji wydarzenie będzie widoczne dla uczestników i otwarte na zapisy.</Notice>
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-8 border-t border-line pt-6">
+                {error && <Notice tone="danger" className="mb-5">{error}</Notice>}
+                {message && <Notice tone="ok" className="mb-5">{message}</Notice>}
+                <div className="flex flex-wrap items-center justify-between gap-3" data-tour="wiz-nav">
+                  <button type="button" onClick={() => step > 1 ? moveToStep(step - 1) : navigate('/organizer')} className="btn btn-quiet">
+                    {step > 1 ? <><Icon name="arrow-left" size={18} /> Wstecz</> : 'Anuluj'}
+                  </button>
+                  <div className="flex flex-wrap gap-3">
+                    <button type="button" onClick={saveForLater} disabled={!draftId || saving} className="btn btn-ghost">
+                      <Icon name="save" size={18} /> Zapisz szkic
+                    </button>
+                    {step < 4 ? (
+                      <button type="button" onClick={() => moveToStep(step + 1)} disabled={!draftId} className="btn btn-primary btn-lg">
+                        Dalej: {STEPS[step].title} <Arrow />
+                      </button>
+                    ) : (
+                      <button type="button" onClick={publish} disabled={publishing || !draftId} className="btn btn-primary btn-lg">
+                        {publishing ? 'Publikowanie…' : 'Opublikuj wydarzenie'} {!publishing && <Icon name="check" size={20} />}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </section>
           </div>
-        </section>
+
+          <aside className="grid gap-5 lg:sticky lg:top-[calc(var(--nav-h)+1.5rem)]">
+            <div className="rounded-card border-[1.5px] border-ink bg-accent p-5 text-accent-ink">
+              <p className="flex items-center gap-2 font-display text-lg font-bold uppercase tracking-[0.04em]"><Icon name="flag" size={18} /> Wskazówka</p>
+              <p className="wizard-tip mt-2 text-[0.9375rem] leading-relaxed">{TIPS[step - 1]}</p>
+            </div>
+
+            <div aria-hidden="true">
+              <p className="eyebrow eyebrow-plain mb-2.5">Tak zobaczą to uczestnicy</p>
+              <div className="card p-5">
+                <div className="flex items-start gap-4">
+                  <div className="ticket-date">
+                    <strong>{previewDate.day}</strong>
+                    <span>{previewDate.month}</span>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <span className="inline-flex items-center gap-2 text-sm font-semibold text-muted"><Icon name={sportIcon(form.sportType)} size={17} />{sportName}</span>
+                    <p className={`h-card mt-2 break-words ${form.title ? '' : '!text-muted'}`}>{form.title || 'Nazwa wydarzenia'}</p>
+                  </div>
+                </div>
+                <p className="mt-4 flex items-start gap-2 text-sm text-muted"><Icon name="pin" size={16} className="mt-0.5 shrink-0" /><span className="min-w-0 break-words">{form.location || 'Miejsce wydarzenia'}</span></p>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <span className="chip">{formatName}</span>
+                  {Number.isFinite(capacityNumber) && capacityNumber > 0 && <span className="chip">{capacityNumber} miejsc</span>}
+                  <span className="chip">{form.registrationType === 'TEAM' ? 'Drużyny' : 'Indywidualnie'}</span>
+                </div>
+              </div>
+            </div>
+          </aside>
+        </div>
       </div>
     </main>
   );
 }
 
-function Field({ name, label, error, className = '', children }) {
+function Field({ name, label, error, hint, optional = false, className = '', children }) {
+  const describedBy = [error ? `${name}-error` : null, hint ? `${name}-hint` : null].filter(Boolean).join(' ') || undefined;
   return (
     <div className={className}>
-      <label htmlFor={name} className="mb-2 block text-sm font-medium text-slate-200">{label}</label>
+      <label htmlFor={name} className="label">
+        {label}
+        {optional && <span className="ml-2 font-normal text-muted">opcjonalnie</span>}
+      </label>
       {cloneElement(children, {
         'aria-invalid': Boolean(error),
-        'aria-describedby': error ? `${name}-error` : undefined,
+        'aria-describedby': describedBy,
       })}
-      {error && <p id={`${name}-error`} className="mt-1.5 text-xs text-red-300" role="alert">{error}</p>}
+      {hint && !error && <p id={`${name}-hint`} className="hint">{hint}</p>}
+      {error && <p id={`${name}-error`} className="error-text" role="alert">{error}</p>}
     </div>
   );
 }
 
-function SummaryCard({ title, children }) {
+function SummaryCard({ title, onEdit, children }) {
   return (
-    <div className="rounded-xl border border-white/10 bg-[#090D16] p-5">
-      <h3 className="mb-3 font-semibold">{title}</h3>
-      <div className="space-y-2">{children}</div>
+    <div className="well p-5">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h3 className="h-card">{title}</h3>
+        <button type="button" onClick={onEdit} className="btn btn-quiet btn-sm !min-h-8 !px-2.5"><Icon name="edit" size={15} /> Zmień</button>
+      </div>
+      <dl className="grid gap-2.5">{children}</dl>
     </div>
   );
 }
 
 function SummaryRow({ label, value }) {
   return (
-    <div className="flex items-start justify-between gap-3 text-sm">
-      <span className="text-slate-500">{label}</span>
-      <span className="text-right text-slate-200">{value}</span>
+    <div className="flex items-start justify-between gap-3 text-[0.9375rem]">
+      <dt className="text-muted">{label}</dt>
+      <dd className="min-w-0 break-words text-right font-semibold text-ink">{value}</dd>
     </div>
   );
 }

@@ -2,6 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
+import { formatDateTime } from '../lib/labels';
+import Icon from '../components/Icon';
+import Reveal from '../components/Reveal';
+import { useTour } from '../components/Tour';
+import { Arrow, EmptyState, Loader, Notice, PageHeader, StatTile, StatusChip } from '../components/ui';
 
 const FILTERS = [
   { id: 'ALL', label: 'Wszystkie' },
@@ -10,62 +15,40 @@ const FILTERS = [
   { id: 'FINISHED', label: 'Zakończone' },
 ];
 
-const STATUS_LABELS = {
-  SCHEDULED: 'Zaplanowany',
-  IN_PROGRESS: 'W trakcie',
-  FINISHED: 'Zakończony',
-};
-
-const STATUS_STYLES = {
-  SCHEDULED: 'border-blue-300/15 bg-blue-300/10 text-blue-200',
-  IN_PROGRESS: 'border-emerald-300/15 bg-emerald-300/10 text-emerald-200',
-  FINISHED: 'border-violet-300/15 bg-violet-300/10 text-violet-200',
-};
-
-function formatDate(value) {
-  if (!value) return 'Termin nieustalony';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? 'Termin nieustalony'
-    : date.toLocaleString('pl-PL', {
-      weekday: 'short',
-      day: 'numeric',
-      month: 'short',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-}
+const TOUR = [
+  { target: '[data-tour="ref-stats"]', title: 'Twoje mecze w liczbach', body: 'Ile spotkań przed Tobą, ile trwa i ile już zamkniętych.' },
+  { target: '[data-tour="ref-list"]', title: 'Otwórz panel meczu', body: 'Każda karta to jedno przydzielone spotkanie. Przycisk „Otwórz panel meczu” prowadzi do ekranu z wynikiem, zegarem i kartkami.' },
+];
 
 function MatchCard({ match }) {
   const finished = match.status === 'FINISHED';
+  const live = match.status === 'IN_PROGRESS';
   const firstName = match.player1?.name || 'Oczekuje na awans';
   const secondName = match.player2?.name || 'Oczekuje na awans';
 
   return (
-    <article className="overflow-hidden rounded-2xl border border-white/[0.08] bg-[#111827]/85 transition hover:border-[#8A3FFC]/35">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] px-4 py-3">
+    <article className={`card overflow-hidden ${live ? '!border-live/50' : ''}`}>
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-line px-4 py-3.5 sm:px-5">
         <div className="min-w-0">
-          <p className="truncate text-sm font-bold text-white">{match.tournament?.title || 'Wydarzenie'}</p>
-          <p className="mt-1 text-xs text-slate-500">
-            {formatDate(match.scheduledAt || match.tournament?.date)} · Runda {match.round}
+          <p className="truncate font-semibold text-ink">{match.tournament?.title || 'Wydarzenie'}</p>
+          <p className="mono mt-1 text-xs text-muted">
+            {formatDateTime(match.scheduledAt || match.tournament?.date, { year: undefined })} · Runda {match.round}
             {match.groupKey ? ` · ${match.groupKey}` : ''}
             {match.court ? ` · ${match.court}` : ''}
           </p>
         </div>
-        <span className={`rounded-full border px-2.5 py-1 text-[10px] font-bold ${STATUS_STYLES[match.status] || STATUS_STYLES.SCHEDULED}`}>
-          {STATUS_LABELS[match.status] || match.status}
-        </span>
+        <StatusChip status={match.status} kind="match" />
       </div>
       <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-4 py-5 sm:px-5">
-        <p className="truncate text-sm font-bold text-white sm:text-base">{firstName}</p>
-        <p className="min-w-16 text-center font-mono text-lg font-black text-white">
-          {finished || match.status === 'IN_PROGRESS'
-            ? `${match.score1 ?? 0} : ${match.score2 ?? 0}`
-            : 'VS'}
+        <p className="min-w-0 break-words font-display text-xl font-bold uppercase leading-tight text-ink sm:text-2xl">{firstName}</p>
+        <p className="num min-w-[4.5rem] text-center text-4xl">
+          {finished || live
+            ? `${match.score1 ?? 0}:${match.score2 ?? 0}`
+            : <span className="text-2xl text-muted">VS</span>}
         </p>
-        <p className="truncate text-right text-sm font-bold text-white sm:text-base">{secondName}</p>
+        <p className="min-w-0 break-words text-right font-display text-xl font-bold uppercase leading-tight text-ink sm:text-2xl">{secondName}</p>
         {(match.extraTimeScore1 || match.extraTimeScore2 || match.penaltyScore1 !== null || match.penaltyScore2 !== null) && (
-          <p className="col-span-3 text-center text-xs text-slate-400">
+          <p className="mono col-span-3 text-center text-xs text-muted">
             {match.extraTimeScore1 || match.extraTimeScore2
               ? `Dogrywka ${match.extraTimeScore1 || 0} : ${match.extraTimeScore2 || 0}`
               : ''}
@@ -75,15 +58,12 @@ function MatchCard({ match }) {
           </p>
         )}
       </div>
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.06] bg-black/10 px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-4 py-3 sm:px-5">
         {match.winnerId
-          ? <p className="text-xs font-semibold text-emerald-200">Zwycięzca: {match.winnerId === match.player1Id ? firstName : secondName}</p>
-          : <p className="text-xs text-slate-500">Twoje przypisane spotkanie</p>}
-        <Link
-          to={`/referee/${match.id}`}
-          className="inline-flex min-h-10 items-center rounded-lg bg-gradient-to-r from-[#0F62FE] to-[#8A3FFC] px-4 text-xs font-bold text-white transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
-        >
-          {finished ? 'Podgląd meczu' : 'Otwórz panel meczu'} →
+          ? <p className="flex items-center gap-2 text-sm font-semibold text-ink"><Icon name="trophy" size={16} />Zwycięzca: {match.winnerId === match.player1Id ? firstName : secondName}</p>
+          : <p className="text-sm text-muted">{live ? 'Mecz trwa — wróć do panelu.' : 'Twoje przypisane spotkanie'}</p>}
+        <Link to={`/referee/${match.id}`} className={`btn btn-sm ${finished ? 'btn-ghost' : 'btn-primary'}`}>
+          {finished ? 'Podgląd meczu' : 'Otwórz panel meczu'} <Arrow size={16} />
         </Link>
       </div>
     </article>
@@ -97,6 +77,8 @@ export default function RefereeDashboard() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
+
+  useTour('referee', TOUR, { auto: true, ready: !loading && matches.length > 0 });
 
   const loadMatches = useCallback(async (showLoading = false) => {
     if (showLoading) setRefreshing(true);
@@ -126,86 +108,85 @@ export default function RefereeDashboard() {
   const completedCount = matches.filter((match) => match.status === 'FINISHED').length;
 
   return (
-    <main className="referee-dashboard min-h-[calc(100vh-5rem)] bg-[#090D16] px-4 py-8 text-white sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-5xl">
-        <header className="relative mb-6 overflow-hidden rounded-3xl border border-[#8A3FFC]/20 bg-gradient-to-br from-[#0F62FE]/15 via-[#111827] to-[#8A3FFC]/15 p-6 sm:p-8">
-          <div className="pointer-events-none absolute -right-10 -top-16 h-48 w-48 rounded-full bg-[#8A3FFC]/15 blur-3xl" aria-hidden="true" />
-          <div className="relative flex flex-wrap items-end justify-between gap-5">
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-violet-200">Panel sędziego</p>
-              <h1 className="mt-2 text-3xl font-black tracking-tight sm:text-4xl">Twoje mecze</h1>
-              <p className="mt-2 text-sm text-slate-400">
-                {user?.name}{user?.username ? ` · @${user.username}` : ''}. Tutaj znajdziesz spotkania przydzielone do Twojego konta.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => { void loadMatches(true); }}
-              disabled={refreshing}
-              className="min-h-11 rounded-xl border border-white/10 bg-white/[0.04] px-4 text-xs font-bold text-white transition hover:bg-white/[0.08] disabled:opacity-50"
-            >
-              {refreshing ? 'Odświeżanie…' : '↻ Odśwież mecze'}
+    <main className="page">
+      <div className="shell">
+        <PageHeader
+          eyebrow="Panel sędziego"
+          title="Twoje mecze"
+          actions={(
+            <button type="button" onClick={() => { void loadMatches(true); }} disabled={refreshing} className="btn btn-ghost btn-sm">
+              <Icon name="refresh" size={16} className={refreshing ? 'spin' : ''} />
+              {refreshing ? 'Odświeżanie…' : 'Odśwież mecze'}
             </button>
-          </div>
-        </header>
-
-        <section className="mb-6 grid gap-3 sm:grid-cols-3" aria-label="Podsumowanie meczów">
-          {[
-            ['Nadchodzące', upcomingCount, 'border-blue-300/15'],
-            ['Na żywo', liveCount, 'border-emerald-300/15'],
-            ['Zakończone', completedCount, 'border-violet-300/15'],
-          ].map(([label, value, border]) => (
-            <div key={label} className={`rounded-2xl border ${border} bg-[#111827]/75 p-4`}>
-              <p className="text-xs text-slate-400">{label}</p>
-              <p className="mt-1 text-2xl font-black text-white">{value}</p>
-            </div>
-          ))}
-        </section>
-
-        <nav aria-label="Filtruj mecze" className="mb-5 flex gap-2 overflow-x-auto">
-          {FILTERS.map((item) => {
-            const count = item.id === 'ALL'
-              ? matches.length
-              : matches.filter((match) => match.status === item.id).length;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                aria-pressed={filter === item.id}
-                onClick={() => setFilter(item.id)}
-                className={`shrink-0 rounded-xl px-4 py-2.5 text-xs font-bold transition ${filter === item.id ? 'bg-[#8A3FFC]/20 text-violet-100 ring-1 ring-[#8A3FFC]/30' : 'bg-white/[0.04] text-slate-400 hover:bg-white/[0.08] hover:text-white'}`}
-              >
-                {item.label} <span className="ml-1 opacity-70">{count}</span>
-              </button>
-            );
-          })}
-        </nav>
+          )}
+        >
+          {user?.name}{user?.username ? <> · <span className="mono text-ink">@{user.username}</span></> : ''}. Tutaj znajdziesz spotkania przydzielone do Twojego konta.
+        </PageHeader>
 
         {error && (
-          <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-300/20 bg-rose-300/[0.06] p-4 text-sm text-rose-100" role="alert">
-            <span>{error}</span>
-            <button type="button" onClick={() => { void loadMatches(true); }} className="font-bold underline">Spróbuj ponownie</button>
-          </div>
+          <Notice
+            tone="danger"
+            className="mb-6"
+            action={<button type="button" onClick={() => { void loadMatches(true); }} className="btn btn-ghost btn-sm shrink-0">Spróbuj ponownie</button>}
+          >
+            {error}
+          </Notice>
         )}
 
         {loading ? (
-          <div className="rounded-2xl border border-white/[0.07] bg-[#111827]/75 p-10 text-center text-sm text-slate-400" role="status">
-            Ładowanie przypisanych meczów…
-          </div>
-        ) : filteredMatches.length ? (
-          <div className="space-y-3">
-            {filteredMatches.map((match) => <MatchCard key={match.id} match={match} />)}
-          </div>
+          <Loader label="Ładowanie przypisanych meczów…" />
+        ) : matches.length === 0 ? (
+          <Reveal>
+            <EmptyState icon="whistle" title="Nie masz jeszcze przypisanych meczów">
+              Podaj organizatorowi swoją nazwę użytkownika{user?.username ? <> — <strong className="mono text-ink">@{user.username}</strong></> : ''}. Gdy przydzieli Cię do meczu, spotkanie pojawi się tutaj.
+            </EmptyState>
+            <ol className="steps mt-6 md:grid-cols-3">
+              {[
+                ['Przekaż nazwę użytkownika', 'Organizator wpisuje ją przy meczu w swoim panelu.'],
+                ['Otwórz przydzielony mecz', 'Zobaczysz go na tej liście razem z terminem i boiskiem.'],
+                ['Prowadź wynik na żywo', 'Start, punkty, kartki i zakończenie — wszystko dużymi przyciskami.'],
+              ].map(([title, body], index) => (
+                <li key={title} className="step" data-state={index === 0 ? 'current' : 'todo'}>
+                  <span className="step-index">{index + 1}</span>
+                  <span>
+                    <span className="block font-semibold text-ink">{title}</span>
+                    <span className="mt-0.5 block text-sm text-muted">{body}</span>
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </Reveal>
         ) : (
-          <div className="rounded-2xl border border-dashed border-white/10 bg-[#111827]/40 p-10 text-center">
-            <p className="text-2xl" aria-hidden="true">◉</p>
-            <h2 className="mt-3 font-bold text-white">{matches.length ? 'Brak meczów w tej kategorii' : 'Nie masz jeszcze przypisanych meczów'}</h2>
-            <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-400">
-              {matches.length
-                ? 'Wybierz inną kategorię, aby zobaczyć pozostałe mecze.'
-                : 'Gdy organizator przydzieli Cię do meczu przez nazwę użytkownika, pojawi się on tutaj.'}
-            </p>
-          </div>
+          <>
+            <Reveal as="section" stagger={0.07} className="mb-8 grid grid-cols-3 gap-3" aria-label="Podsumowanie meczów" data-tour="ref-stats">
+              <StatTile label="Nadchodzące" value={upcomingCount} icon="calendar" />
+              <StatTile label="Na żywo" value={liveCount} icon="bolt" tone={liveCount ? 'live' : undefined} />
+              <StatTile label="Zakończone" value={completedCount} icon="check" />
+            </Reveal>
+
+            <div role="group" aria-label="Filtruj mecze" className="-mx-4 mb-5 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0">
+              {FILTERS.map((item) => {
+                const count = item.id === 'ALL'
+                  ? matches.length
+                  : matches.filter((match) => match.status === item.id).length;
+                return (
+                  <button key={item.id} type="button" aria-pressed={filter === item.id} onClick={() => setFilter(item.id)} className="pill">
+                    {item.label} <span className="pill-count">{count}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div data-tour="ref-list">
+              {filteredMatches.length ? (
+                <Reveal key={filter} stagger={0.06} className="grid gap-4 lg:grid-cols-2">
+                  {filteredMatches.map((match) => <MatchCard key={match.id} match={match} />)}
+                </Reveal>
+              ) : (
+                <p className="well p-6 text-center text-sm text-muted">Brak meczów w tej kategorii. Wybierz inną, aby zobaczyć pozostałe spotkania.</p>
+              )}
+            </div>
+          </>
         )}
       </div>
     </main>

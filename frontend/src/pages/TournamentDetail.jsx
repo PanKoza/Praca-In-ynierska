@@ -2,38 +2,22 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams, useNavigate, useLocation } from 'react-router-dom';
 import api from '../api/axios';
 import { useAuth } from '../context/AuthContext';
+import { FORMAT_LABELS, capacity, formatDateTime, plural } from '../lib/labels';
+import Icon from '../components/Icon';
+import Reveal from '../components/Reveal';
+import { Arrow, Avatar, BackLink, FullPageLoader, Meter, Notice, SectionHeading, SportLabel, StatusChip, Title } from '../components/ui';
 
-const SPORT_LABELS = {
-  BEACH_VOLLEYBALL: '🏐 Siatkówka plażowa',
-  FOOTBALL_6V6: '⚽ Piłka nożna 6v6',
-  SOCCER: '⚽ Piłka nożna',
-  BASKETBALL: '🏀 Koszykówka',
-  VOLLEYBALL: '🏐 Siatkówka',
-  TENNIS: '🎾 Tenis',
-  ESPORTS: '🎮 E-sport',
-  CUSTOM: '🏅 Inna dyscyplina',
-  OTHER: '🏅 Inne',
-};
-
-const FORMAT_LABELS = {
-  SINGLE_ELIMINATION: 'Pojedyncza eliminacja',
-  DOUBLE_ELIMINATION: 'Podwójna eliminacja',
-  ROUND_ROBIN: 'Każdy z każdym',
-  GROUP_STAGE: 'Grupy i play-offy',
-};
-
-const STATUS_STYLES = {
-  DRAFT: 'bg-slate-700 text-slate-300',
-  OPEN: 'bg-green-900/60 text-green-300',
-  PUBLISHED: 'bg-green-900/60 text-green-300',
-  IN_PROGRESS: 'bg-yellow-900/60 text-yellow-300',
-  FINISHED: 'bg-blue-900/60 text-blue-300',
-  CANCELLED: 'bg-red-900/60 text-red-300',
-};
-const STATUS_LABELS = {
-  DRAFT: 'Szkic', OPEN: 'Otwarte', PUBLISHED: 'Opublikowany', IN_PROGRESS: 'W toku', FINISHED: 'Zakończone', CANCELLED: 'Anulowane',
-};
-const MATCH_STATUS_LABELS = { SCHEDULED: 'Zaplanowany', IN_PROGRESS: 'W trakcie', FINISHED: 'Zakończony' };
+function Fact({ icon, label, value }) {
+  return (
+    <div className="flex items-start gap-3">
+      <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-[10px] border border-line bg-bg text-ink"><Icon name={icon} size={18} /></span>
+      <div className="min-w-0">
+        <dt className="mono text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-muted">{label}</dt>
+        <dd className="mt-0.5 break-words font-semibold text-ink">{value}</dd>
+      </div>
+    </div>
+  );
+}
 
 export default function TournamentDetail() {
   const { id } = useParams();
@@ -79,8 +63,9 @@ export default function TournamentDetail() {
 
   const isParticipant = user && tournament?.participants.some((p) => p.userId === user.id);
   const isOrganizer = user && tournament?.organizerId === user.id;
+  const registrationOpen = ['OPEN', 'PUBLISHED'].includes(tournament?.status);
   const canJoin = (!user || user.role === 'PLAYER')
-    && ['OPEN', 'PUBLISHED'].includes(tournament?.status)
+    && registrationOpen
     && !isParticipant;
   const canLeave = user?.role === 'PLAYER' && isParticipant;
 
@@ -175,207 +160,221 @@ export default function TournamentDetail() {
     }
   }
 
-  if (loading) {
-    return (
-      <div className="min-h-[calc(100vh-4rem)] bg-slate-950 flex items-center justify-center">
-        <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
-  }
-
+  if (loading) return <FullPageLoader label="Ładowanie wydarzenia…" />;
   if (!tournament) return null;
 
-  return (
-    <main className="tournament-detail min-h-[calc(100vh-4rem)] bg-slate-950 px-4 py-10">
-      <div className="max-w-4xl mx-auto space-y-6">
+  const seats = capacity(tournament._count.participants, tournament.maxParticipants);
+  const liveCount = tournament.matches.filter((match) => match.status === 'IN_PROGRESS').length;
 
-        {/* Header card */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8">
-          <div className="flex flex-wrap gap-3 items-center mb-4">
-            <span className="text-slate-400 text-sm">{SPORT_LABELS[tournament.sportType]}</span>
-            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${STATUS_STYLES[tournament.status]}`}>
-              {STATUS_LABELS[tournament.status]}
-            </span>
-          </div>
-          <h1 className="text-3xl font-bold text-white mb-2">{tournament.title}</h1>
-          {tournament.description && (
-            <p className="text-slate-400 mb-4">{tournament.description}</p>
-          )}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
-            <Stat label="Data" value={new Date(tournament.date).toLocaleString('pl-PL', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })} />
-            <Stat label="Organizator" value={tournament.organizer.name} />
-            <Stat label="Uczestnicy" value={`${tournament._count.participants} / ${tournament.maxParticipants}`} />
-            <Stat label="Mecze" value={tournament.matches.length} />
-          </div>
-          {(tournament.location || tournament.format || tournament.registrationDeadline || tournament.entryFee !== null) && (
-            <div className="mt-5 grid grid-cols-2 gap-4 border-t border-slate-800 pt-5 text-sm sm:grid-cols-4">
-              {tournament.location && <Stat label="Lokalizacja" value={tournament.location} />}
-              {tournament.format && <Stat label="Format" value={FORMAT_LABELS[tournament.format] || tournament.format} />}
-              {tournament.registrationDeadline && (
-                <Stat label="Zapisy do" value={new Date(tournament.registrationDeadline).toLocaleString('pl-PL')} />
-              )}
+  return (
+    <main className="page">
+      <div className="shell">
+        <BackLink to="/tournaments">Wszystkie wydarzenia</BackLink>
+
+        <div className="grid gap-8 lg:grid-cols-[1fr_360px] lg:items-start">
+          <header className="min-w-0">
+            <div className="mb-5 flex flex-wrap items-center gap-3">
+              <SportLabel sport={tournament.sportType} />
+              <StatusChip status={tournament.status} />
+              {liveCount > 0 && <span className="chip" data-tone="live"><span className="live-dot" aria-hidden="true" />{liveCount} {plural(liveCount, 'mecz trwa', 'mecze trwają', 'meczów trwa')}</span>}
+            </div>
+            <Title>{tournament.title}</Title>
+            {tournament.description && <p className="lede mt-5 max-w-2xl whitespace-pre-line">{tournament.description}</p>}
+
+            <Reveal as="dl" stagger={0.05} className="mt-8 grid gap-x-6 gap-y-5 sm:grid-cols-2 xl:grid-cols-3">
+              <Fact icon="calendar" label="Termin" value={formatDateTime(tournament.date, { month: 'long' })} />
+              {tournament.location && <Fact icon="pin" label="Lokalizacja" value={tournament.location} />}
+              <Fact icon="user" label="Organizator" value={tournament.organizer.name} />
+              {tournament.format && <Fact icon="bracket" label="Format" value={FORMAT_LABELS[tournament.format] || tournament.format} />}
               {tournament.registrationType && (
-                <Stat
+                <Fact
+                  icon="users"
                   label="Zgłoszenia"
                   value={tournament.registrationType === 'TEAM'
                     ? `Drużynowe${tournament.minTeamSize ? ` · ${tournament.minTeamSize}–${tournament.maxTeamSize} osób` : ''}`
                     : 'Indywidualne'}
                 />
               )}
-              {tournament.entryFee !== null && (
-                <Stat label="Wpisowe" value={`${Number(tournament.entryFee).toFixed(2)} ${tournament.currency || ''}`} />
+              {tournament.registrationDeadline && <Fact icon="clock" label="Zapisy do" value={formatDateTime(tournament.registrationDeadline)} />}
+              {tournament.entryFee !== null && tournament.entryFee !== undefined && (
+                <Fact icon="card" label="Wpisowe" value={Number(tournament.entryFee) > 0 ? `${Number(tournament.entryFee).toFixed(2)} ${tournament.currency || ''}` : 'Bezpłatne'} />
+              )}
+              <Fact icon="list" label="Mecze" value={tournament.matches.length || 'Harmonogram w przygotowaniu'} />
+            </Reveal>
+          </header>
+
+          <Reveal as="aside" delay={0.15} className="card card-pad lg:sticky lg:top-[calc(var(--nav-h)+1.5rem)]" aria-label="Zapisy">
+            <p className="eyebrow eyebrow-plain">Zapisy</p>
+            <p className="num mt-3 text-6xl">
+              {seats.taken}<span className="text-muted">/{seats.limit}</span>
+            </p>
+            <p className="mt-2 text-sm text-muted">
+              {seats.free > 0
+                ? `Zostało ${seats.free} ${plural(seats.free, 'wolne miejsce', 'wolne miejsca', 'wolnych miejsc')}`
+                : 'Wszystkie miejsca są zajęte'}
+            </p>
+            <Meter value={seats.percent} label={`Zajęte ${seats.percent}% miejsc`} className="mt-4" />
+
+            <div className="mt-6 grid gap-3">
+              {canJoin && (
+                <>
+                  <button type="button" onClick={handleJoin} disabled={joinLoading} className="btn btn-primary btn-lg btn-block">
+                    {joinLoading ? 'Zapisywanie…' : 'Zapisz się'} {!joinLoading && <Arrow />}
+                  </button>
+                  <p className="hint !mt-0">
+                    {user
+                      ? 'Po zapisie Twoje mecze i wyniki pojawią się w panelu zawodnika.'
+                      : 'Nie masz konta? Założysz je w następnym kroku, a my od razu dopiszemy Cię do listy.'}
+                  </p>
+                </>
+              )}
+              {canLeave && (
+                <>
+                  <div className="notice" data-tone="ok">
+                    <Icon name="check" size={19} />
+                    <span>Jesteś na liście uczestników.</span>
+                  </div>
+                  <Link to="/player" className="btn btn-solid btn-block">Mój panel zawodnika <Arrow /></Link>
+                  <button type="button" onClick={handleLeave} disabled={joinLoading} className="btn btn-quiet btn-sm">
+                    {joinLoading ? 'Chwileczkę…' : 'Wypisz się z wydarzenia'}
+                  </button>
+                </>
+              )}
+              {canManage && (
+                <>
+                  {isOrganizer && <p className="text-sm font-semibold text-ink">To Twoje wydarzenie.</p>}
+                  <Link to={`/organizer/events/${id}`} className="btn btn-solid btn-block">Zarządzaj wydarzeniem <Arrow /></Link>
+                </>
+              )}
+              {!canJoin && !canLeave && !canManage && (
+                <p className="text-sm leading-relaxed text-muted">
+                  {registrationOpen
+                    ? 'Zapisy są przeznaczone dla kont zawodników.'
+                    : 'Zapisy na to wydarzenie są zamknięte. Możesz śledzić mecze i wyniki poniżej.'}
+                </p>
               )}
             </div>
-          )}
-
-          {/* Action buttons */}
-          <div className="mt-6 flex flex-wrap gap-3 items-center">
-            {canJoin && (
-              <button
-                onClick={handleJoin}
-                disabled={joinLoading}
-                className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-semibold px-5 py-2 rounded-lg transition-colors"
-              >
-                {joinLoading ? 'Zapisywanie...' : 'Zapisz się'}
-              </button>
-            )}
-            {canLeave && (
-              <button
-                onClick={handleLeave}
-                disabled={joinLoading}
-                className="bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white font-semibold px-5 py-2 rounded-lg transition-colors"
-              >
-                {joinLoading ? '...' : 'Wypisz się'}
-              </button>
-            )}
-            {isOrganizer && (
-              <span className="text-sm text-indigo-400 font-medium">Jesteś organizatorem</span>
-            )}
-            {actionMsg && <span className="text-sm text-green-400">{actionMsg}</span>}
-          </div>
+          </Reveal>
         </div>
 
-        {/* Participants */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
-          <h2 className="text-white font-semibold text-lg mb-4">
-            Uczestnicy ({tournament._count.participants}/{tournament.maxParticipants})
-          </h2>
+        {actionMsg && <Notice className="mt-8" onClose={() => setActionMsg('')}>{actionMsg}</Notice>}
+
+        <section className="mt-14">
+          <SectionHeading eyebrow="Kto gra" title="Uczestnicy" count={`${seats.taken}/${seats.limit}`} />
           {tournament.participants.length === 0 ? (
-            <p className="text-slate-500 text-sm">Brak zapisanych uczestników.</p>
+            <p className="well p-5 text-sm text-muted">Jeszcze nikt się nie zapisał. {canJoin ? 'Możesz być pierwszą osobą na liście.' : ''}</p>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            <Reveal as="ul" stagger={0.025} className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
               {tournament.participants.map((p) => (
-                <div key={p.id} className="flex items-center gap-2 bg-slate-800 rounded-lg px-3 py-2 text-sm text-slate-300">
-                  <span className="w-7 h-7 rounded-full bg-indigo-700 flex items-center justify-center text-white text-xs font-bold">
-                    {p.user.name.charAt(0).toUpperCase()}
-                  </span>
-                  {p.user.name}
-                </div>
+                <li key={p.id} className="flex items-center gap-3 rounded-[12px] border border-line bg-surface px-3 py-2.5">
+                  <Avatar name={p.user.name} />
+                  <span className="min-w-0 truncate text-[0.9375rem] font-semibold text-ink">{p.user.name}</span>
+                  {user?.id === p.userId && <span className="chip ml-auto" data-tone="accent">Ty</span>}
+                </li>
               ))}
-            </div>
+            </Reveal>
           )}
-        </div>
+        </section>
 
-        {/* Matches */}
         {Object.keys(standings).length > 0 && (
-          <section className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
-            <h2 className="mb-4 text-lg font-semibold text-white">Tabele na żywo</h2>
-            <div className="grid gap-5 md:grid-cols-2">
+          <section className="mt-14">
+            <SectionHeading eyebrow="Aktualizowane na żywo" title="Tabele" />
+            <div className="grid gap-5 lg:grid-cols-2">
               {Object.entries(standings).map(([group, entries]) => (
-                <div key={group}>
-                  <h3 className="mb-2 text-sm font-semibold text-slate-300">{group === 'general' ? 'Klasyfikacja' : group}</h3>
+                <Reveal key={group} className="card overflow-hidden">
+                  <h3 className="h-card border-b border-line px-5 py-4">{group === 'general' ? 'Klasyfikacja' : group}</h3>
                   <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs text-slate-300">
-                      <thead className="text-slate-500">
-                        <tr><th className="p-2">#</th><th className="p-2">Uczestnik</th><th className="p-2">M</th><th className="p-2">+/-</th><th className="p-2">Pkt</th><th className="p-2">FP</th></tr>
+                    <table className="table min-w-[420px]">
+                      <thead>
+                        <tr>
+                          <th scope="col">#</th>
+                          <th scope="col">Uczestnik</th>
+                          <th scope="col" title="Mecze">M</th>
+                          <th scope="col" title="Bilans">+/-</th>
+                          <th scope="col" title="Punkty">Pkt</th>
+                          <th scope="col" title="Fair play">FP</th>
+                        </tr>
                       </thead>
                       <tbody>
                         {entries.map((entry) => (
-                          <tr key={entry.participantId} className="border-t border-slate-800">
-                            <td className="p-2 font-bold text-[#39B4FE]">{entry.position}</td>
-                            <td className="p-2 font-medium text-white">{entry.name}</td>
-                            <td className="p-2">{entry.played}</td>
-                            <td className="p-2">{entry.difference > 0 ? '+' : ''}{entry.difference}</td>
-                            <td className="p-2 font-bold">{entry.points}</td>
-                            <td className="p-2">{entry.fairPlay}</td>
+                          <tr key={entry.participantId}>
+                            <td><span className={`num text-xl ${entry.position === 1 ? 'marker' : ''}`}>{entry.position}</span></td>
+                            <td className="font-semibold text-ink">{entry.name}</td>
+                            <td className="mono">{entry.played}</td>
+                            <td className="mono">{entry.difference > 0 ? '+' : ''}{entry.difference}</td>
+                            <td className="mono font-bold text-ink">{entry.points}</td>
+                            <td className="mono">{entry.fairPlay}</td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
-                </div>
+                </Reveal>
               ))}
             </div>
           </section>
         )}
 
         {tournament.matches.length > 0 && (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
-            <h2 className="text-white font-semibold text-lg mb-4">Mecze</h2>
-            <div className="space-y-3">
-              {tournament.matches.map((m) => (
-                <div key={m.id} className="bg-slate-800 rounded-xl px-4 py-3 flex flex-wrap items-center gap-4">
-                  <span className="text-xs text-slate-500 w-16">Runda {m.round}</span>
-                  <div className="flex items-center gap-3 flex-1 justify-center font-semibold text-white">
-                    <span>{m.player1?.name || 'Oczekiwanie na awans'}</span>
-                    <span className="text-slate-400 text-lg">
-                      {m.status === 'FINISHED'
-                        ? `${m.score1} — ${m.score2}`
-                        : 'vs'}
-                    </span>
-                    <span>{m.player2?.name || 'Oczekiwanie na awans'}</span>
-                  </div>
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${
-                    m.status === 'FINISHED' ? 'bg-blue-900/60 text-blue-300' :
-                    m.status === 'IN_PROGRESS' ? 'bg-yellow-900/60 text-yellow-300' :
-                    'bg-slate-700 text-slate-400'
-                  }`}>
-                    {MATCH_STATUS_LABELS[m.status]}
-                  </span>
-                  {m.winnerId && (
-                    <span className="text-xs font-semibold text-emerald-300">
-                      Zwycięzca: {m.winnerId === m.player1Id ? m.player1?.name : m.player2?.name}
-                    </span>
-                  )}
-                  <Link
-                    to={`/tournaments/${id}/matches/${m.id}/live`}
-                    className="rounded-lg border border-[#0F62FE]/25 bg-[#0F62FE]/10 px-3 py-2 text-xs font-semibold text-blue-200 transition hover:bg-[#0F62FE]/20"
-                  >
-                    Śledź wynik{m.status === 'IN_PROGRESS' ? ' · LIVE' : ''}
-                  </Link>
-                  {canManage && m.player1 && m.player2 && (
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button type="button" onClick={() => createRefereeLink(m.id)} className="rounded-lg bg-[#0F62FE]/15 px-3 py-2 text-xs font-semibold text-blue-200 hover:bg-[#0F62FE]/25">
-                        Przydziel sędziego
-                      </button>
-                      {refereeLinks[m.id] && (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => navigator.clipboard.writeText(`${window.location.origin}${refereeLinks[m.id].accessUrl}`).then(() => setActionMsg('Link sędziego skopiowany.')).catch(() => setActionMsg('Skopiuj link sędziego ręcznie.'))}
-                            className="rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-200"
-                          >Kopiuj link sędziego</button>
-                          <button type="button" onClick={() => revokeRefereeLink(m.id)} className="rounded-lg border border-red-400/20 px-3 py-2 text-xs font-semibold text-red-200">Unieważnij</button>
-                          <a href={refereeLinks[m.id].accessUrl} className="w-full break-all text-xs text-slate-400 underline">{window.location.origin}{refereeLinks[m.id].accessUrl}</a>
-                        </>
-                      )}
+          <section className="mt-14">
+            <SectionHeading eyebrow="Harmonogram i wyniki" title="Mecze" count={tournament.matches.length} />
+            <Reveal stagger={0.04} className="grid gap-3">
+              {tournament.matches.map((m) => {
+                const live = m.status === 'IN_PROGRESS';
+                const showScore = m.status === 'FINISHED' || live;
+                return (
+                  <article key={m.id} className={`card p-4 sm:p-5 ${live ? '!border-live/50' : ''}`}>
+                    <div className="grid items-center gap-4 md:grid-cols-[110px_1fr_auto]">
+                      <div className="flex items-center gap-3 md:block">
+                        <p className="mono text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-muted">Runda {m.round}</p>
+                        <StatusChip status={m.status} kind="match" className="md:mt-2" />
+                      </div>
+                      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+                        <p className={`min-w-0 break-words text-right font-semibold ${m.winnerId && m.winnerId === m.player1Id ? 'text-ink' : m.winnerId ? 'text-muted' : 'text-ink'}`}>
+                          {m.player1?.name || 'Oczekiwanie na awans'}
+                        </p>
+                        <p className="num min-w-[4.5rem] text-center text-3xl">
+                          {showScore ? `${m.score1 ?? 0}:${m.score2 ?? 0}` : <span className="text-xl text-muted">VS</span>}
+                        </p>
+                        <p className={`min-w-0 break-words font-semibold ${m.winnerId && m.winnerId === m.player2Id ? 'text-ink' : m.winnerId ? 'text-muted' : 'text-ink'}`}>
+                          {m.player2?.name || 'Oczekiwanie na awans'}
+                        </p>
+                      </div>
+                      <Link to={`/tournaments/${id}/matches/${m.id}/live`} className={`btn btn-sm ${live ? 'btn-primary' : 'btn-ghost'}`}>
+                        {live ? 'Oglądaj na żywo' : 'Śledź wynik'} <Arrow size={16} />
+                      </Link>
                     </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
+                    {m.winnerId && (
+                      <p className="mt-3 flex items-center gap-2 border-t border-line pt-3 text-sm font-semibold text-ink">
+                        <Icon name="trophy" size={16} />
+                        Zwycięzca: {m.winnerId === m.player1Id ? m.player1?.name : m.player2?.name}
+                      </p>
+                    )}
+                    {canManage && m.player1 && m.player2 && (
+                      <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3">
+                        <button type="button" onClick={() => createRefereeLink(m.id)} className="btn btn-ghost btn-sm">
+                          <Icon name="link" size={16} /> Utwórz link dla sędziego
+                        </button>
+                        {refereeLinks[m.id] && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => navigator.clipboard.writeText(`${window.location.origin}${refereeLinks[m.id].accessUrl}`).then(() => setActionMsg('Link sędziego skopiowany.')).catch(() => setActionMsg('Skopiuj link sędziego ręcznie.'))}
+                              className="btn btn-solid btn-sm"
+                            ><Icon name="copy" size={16} /> Kopiuj link</button>
+                            <button type="button" onClick={() => revokeRefereeLink(m.id)} className="btn btn-danger btn-sm">Unieważnij</button>
+                            <a href={refereeLinks[m.id].accessUrl} className="mono w-full break-all text-xs text-muted underline">{window.location.origin}{refereeLinks[m.id].accessUrl}</a>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </article>
+                );
+              })}
+            </Reveal>
+          </section>
         )}
       </div>
     </main>
-  );
-}
-
-function Stat({ label, value }) {
-  return (
-    <div>
-      <p className="text-slate-500 text-xs mb-0.5">{label}</p>
-      <p className="text-white font-medium">{value}</p>
-    </div>
   );
 }

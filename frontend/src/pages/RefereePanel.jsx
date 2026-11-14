@@ -9,10 +9,22 @@ import {
   readMatchCommands,
   removeMatchCommand,
 } from '../api/offlineMatchQueue';
+import { gsap, prefersReducedMotion, useGSAP } from '../lib/motion';
+import { useThemeName } from '../lib/theme';
+import Icon from '../components/Icon';
+import { useTour } from '../components/Tour';
+import ClickSpark from '../components/reactbits/ClickSpark';
+import Counter from '../components/reactbits/Counter';
+import { BackLink, FullPageLoader, Notice } from '../components/ui';
 
 const AUTHORIZATION = (token) => ({ Authorization: `Bearer ${token}` });
-const BASE_CLASS = 'referee-live-panel min-h-[calc(100vh-4rem)] bg-[#090D16] px-4 py-5 text-white sm:px-6 sm:py-8';
-const BUTTON_CLASS = 'min-h-16 rounded-2xl border border-white/10 bg-[#171F2D] px-5 py-4 text-base font-bold text-white transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0F62FE]';
+const TOUR = [
+  { target: '[data-tour="ref-clock"]', title: 'Zacznij od startu', body: 'Naciśnij „Start meczu”, gdy drużyny są gotowe. Zegar ruszy, a kibice zobaczą, że mecz trwa.' },
+  { target: '[data-tour="ref-score"]', title: 'Punkty jednym dotknięciem', body: 'Duży przycisk +1 dodaje punkt stronie A lub B. Mniejszy −1 poprawia pomyłkę.' },
+  { target: '[data-tour="ref-cards"]', title: 'Kartki', body: 'Wybierz zawodnika z listy i dotknij żółtej lub czerwonej kartki.' },
+  { target: '[data-tour="ref-undo"]', title: 'Zawsze możesz cofnąć', body: '„Cofnij” usuwa ostatnie zdarzenie, „Ponów” je przywraca. Nic nie ginie — wszystko jest w historii.' },
+  { target: '[data-tour="ref-finish"]', title: 'Na koniec zatwierdź wynik', body: 'Po ostatnim gwizdku naciśnij „Zakończ mecz” i potwierdź. Wynik trafi do tabeli i drabinki.' },
+];
 
 function applyOptimistic(match, command) {
   const next = { ...match, revision: match.revision + 1 };
@@ -94,6 +106,17 @@ export default function RefereePanel() {
   const confirmedMatch = useRef(null);
   const queuedCommands = useRef([]);
   const syncing = useRef(false);
+  const rootRef = useRef(null);
+  const theme = useThemeName();
+  const matchStatus = match?.status;
+
+  useTour('referee-panel', TOUR, { auto: true, ready: Boolean(match) });
+
+  /* The hint bar nudges in whenever the advice changes, so the next step never goes unnoticed. */
+  useGSAP(() => {
+    if (!matchStatus || prefersReducedMotion()) return;
+    gsap.fromTo('.ref-hint', { y: -8, autoAlpha: 0.3 }, { y: 0, autoAlpha: 1, duration: 0.5, ease: 'expo.out' });
+  }, { dependencies: [matchStatus, finishing], scope: rootRef });
 
   useEffect(() => {
     if (!searchParams.has('access')) return;
@@ -284,170 +307,243 @@ export default function RefereePanel() {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
   if (loading || authLoading) {
-    return <main className={`${BASE_CLASS} grid place-items-center`} aria-live="polite">Łączenie z meczem…</main>;
+    return <FullPageLoader label="Łączenie z meczem…" />;
   }
   if (!match) {
-    return <main className={`${BASE_CLASS} grid place-items-center`}><p role="alert" className="max-w-md text-center text-red-200">{error}</p></main>;
+    return (
+      <main className="page">
+        <div className="shell-narrow"><Notice tone="danger">{error}</Notice></div>
+      </main>
+    );
   }
 
   const finished = match.status === 'FINISHED';
   const canScore = !finished && Boolean(match.player1?.id && match.player2?.id);
   const clock = formatClock(match, now);
   const players = [match.player1, match.player2];
+  const scheduled = match.status === 'SCHEDULED';
+  const hint = finished
+    ? 'Mecz zakończony. Wynik trafił do tabeli i drabinki.'
+    : finishing
+      ? 'Sprawdź wynik poniżej i potwierdź zakończenie meczu.'
+      : !canScore
+        ? 'Ten mecz czeka jeszcze na obu uczestników — wynik odblokuje się po ich przypisaniu.'
+        : scheduled
+          ? 'Krok 1: gdy obie strony są gotowe, naciśnij „Start meczu”.'
+          : 'Dodawaj punkty przyciskami +1. Pomyłka? „Cofnij” usuwa ostatnie zdarzenie.';
 
   return (
-    <main className={BASE_CLASS}>
+    <main ref={rootRef} className="min-h-[calc(100vh-var(--nav-h))] px-3 pb-16 pt-5 sm:px-6 sm:pt-8">
       <div className="mx-auto max-w-2xl">
-        <header className="mb-5 flex items-center justify-between gap-3">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#8A3FFC]">Panel sędziego · wynik na żywo</p>
-            <h1 className="mt-1 text-lg font-bold">{match.tournament?.title || 'Panel sędziego'}</h1>
+        {user?.role === 'REFEREE' && <BackLink to="/referee">Moje mecze</BackLink>}
+        <header className="mb-4 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="eyebrow mb-2">Panel sędziego</p>
+            <h1 className="h-section break-words">{match.tournament?.title || 'Panel sędziego'}</h1>
           </div>
-          <span className={`inline-flex items-center gap-2 rounded-full px-3 py-2 text-xs font-semibold ${online ? 'bg-emerald-400/10 text-emerald-300' : 'bg-amber-400/10 text-amber-200'}`}>
-            <span className={`h-2 w-2 rounded-full ${online ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+          <span className="chip mt-1" data-tone={online ? 'ok' : 'warn'}>
+            <Icon name={online ? 'wifi' : 'wifi-off'} size={13} />
             {online ? 'Online' : 'Offline'}
           </span>
         </header>
 
-        {error && <div className="mb-4 rounded-xl border border-red-400/20 bg-red-500/10 p-3 text-sm text-red-200" role="alert">{error}</div>}
-        <div className="mb-5 rounded-xl border border-white/10 bg-[#121826] px-4 py-3 text-xs text-slate-300" aria-live="polite">
-          {syncMessage || (pending.length ? `${pending.length} zdarzeń oczekuje na synchronizację.` : 'Wszystkie zdarzenia są zsynchronizowane.')}
-          {pending.length > 0 && <span className="ml-2 text-amber-200">Kolejka: {pending.length}</span>}
+        <div className="ref-hint mb-4 flex items-start gap-3 rounded-[12px] border-[1.5px] border-ink bg-accent px-4 py-3 text-[0.9375rem] font-semibold leading-snug text-accent-ink" aria-live="polite">
+          <Icon name={finished ? 'check' : 'flag'} size={19} className="mt-0.5 shrink-0" />
+          <span>{hint}</span>
         </div>
 
-        <section className="rounded-3xl border border-white/10 bg-[#121826] p-4 shadow-2xl shadow-blue-950/20 sm:p-7" aria-label="Wynik na żywo">
-          <div className="mb-5 flex items-center justify-between text-xs text-slate-400">
-            <span>{match.court ? `Boisko · ${match.court}` : `Runda ${match.round}`}</span>
-            <span className={`rounded-full px-3 py-1 font-semibold ${finished ? 'bg-[#8A3FFC]/15 text-purple-200' : 'bg-[#0F62FE]/15 text-blue-200'}`}>
-              {finished ? 'Mecz zakończony' : match.status === 'IN_PROGRESS' ? 'Mecz w toku' : 'Gotowy do startu'}
+        {error && <Notice tone="danger" className="mb-4">{error}</Notice>}
+        <div className="mono mb-4 flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-xs text-muted" aria-live="polite">
+          <Icon name={pending.length ? 'refresh' : 'check'} size={14} className={pending.length && online ? 'spin' : ''} />
+          <span>{syncMessage || (pending.length ? `${pending.length} zdarzeń oczekuje na synchronizację.` : 'Wszystkie zdarzenia są zsynchronizowane.')}</span>
+          {pending.length > 0 && <span className="chip !h-[22px]" data-tone="warn">Kolejka: {pending.length}</span>}
+        </div>
+
+        <section className="scoreboard" aria-label="Wynik na żywo">
+          <div className="scoreboard-head">
+            <span className="mono text-xs font-semibold uppercase tracking-[0.1em] text-muted">{match.court ? `Boisko · ${match.court}` : `Runda ${match.round}`}</span>
+            <span className="chip" data-tone={finished ? 'done' : scheduled ? 'neutral' : 'live'}>
+              {!finished && !scheduled && <span className="live-dot" aria-hidden="true" />}
+              {finished ? 'Mecz zakończony' : scheduled ? 'Gotowy do startu' : 'Mecz w toku'}
             </span>
           </div>
-          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
-            <div className="min-w-0 text-center">
-              <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.16em] text-[#81B7FF]">Drużyna A</p>
-              <p className="min-h-12 text-sm font-semibold text-slate-200 sm:text-base">{match.player1?.name || 'Oczekiwanie na awans'}</p>
-              <p className="my-2 text-6xl font-black tabular-nums text-white sm:text-7xl">{match.score1 ?? 0}</p>
-              {match.extraTimeScore1 > 0 && <p className="text-xs text-slate-400">Dogrywka: {match.extraTimeScore1}</p>}
-            </div>
-            <span className="text-2xl font-bold text-slate-600">:</span>
-            <div className="min-w-0 text-center">
-              <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.16em] text-[#C4B5FD]">Drużyna B</p>
-              <p className="min-h-12 text-sm font-semibold text-slate-200 sm:text-base">{match.player2?.name || 'Oczekiwanie na awans'}</p>
-              <p className="my-2 text-6xl font-black tabular-nums text-white sm:text-7xl">{match.score2 ?? 0}</p>
-              {match.extraTimeScore2 > 0 && <p className="text-xs text-slate-400">Dogrywka: {match.extraTimeScore2}</p>}
-            </div>
-          </div>
 
-          <div className="my-5 flex flex-wrap items-center justify-center gap-3">
-            <span className="rounded-lg bg-black/25 px-3 py-2 font-mono text-lg font-bold tabular-nums text-[#39B4FE]" aria-live="off">{clock}</span>
-            <span className="rounded-lg bg-white/5 px-3 py-2 text-xs font-medium text-slate-300">Część {match.period || '1'}</span>
-            {match.clockRunning
-              ? <button type="button" disabled={pending.length > 0} onClick={() => record('CLOCK_CHANGED', { action: 'PAUSE' })} className="min-h-11 rounded-xl bg-white/10 px-4 text-sm font-semibold disabled:opacity-40">Pauza</button>
-              : <button type="button" disabled={finished || pending.length > 0} onClick={() => record(match.status === 'SCHEDULED' ? 'MATCH_STARTED' : 'CLOCK_CHANGED', { action: 'START' })} className="min-h-11 rounded-xl bg-[#0F62FE] px-4 text-sm font-semibold disabled:opacity-40">{match.status === 'SCHEDULED' ? 'Start meczu' : 'Wznów czas'}</button>}
-            <button type="button" disabled={finished || pending.length > 0} onClick={() => setExtraTime((current) => !current)} aria-pressed={extraTime} className={`min-h-11 rounded-xl px-4 text-sm font-semibold ${extraTime ? 'bg-[#8A3FFC] text-white' : 'bg-white/10 text-slate-200'}`}>Dogrywka</button>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            {[1, 2].map((side) => (
-              <div key={side} className="grid grid-cols-2 gap-2">
-                <button type="button" aria-label={`Odejmij punkt drużynie ${side === 1 ? 'A' : 'B'}`} disabled={!canScore || ((extraTime ? match[`extraTimeScore${side}`] : match[`score${side}`]) || 0) < 1} onClick={() => record('SCORE_CHANGED', { side, delta: -1, period: extraTime ? 'extraTime' : 'regular' })} className={`${BUTTON_CLASS} !min-h-[4.5rem] !px-2 text-xl`}>−1</button>
-                <button type="button" aria-label={`Dodaj punkt drużynie ${side === 1 ? 'A' : 'B'}`} disabled={!canScore} onClick={() => record('SCORE_CHANGED', { side, delta: 1, period: extraTime ? 'extraTime' : 'regular' })} className="referee-score-button min-h-[4.5rem] rounded-2xl bg-gradient-to-br from-[#0F62FE] to-[#8A3FFC] text-base font-extrabold text-white shadow-lg shadow-blue-950/30 transition active:scale-[0.97] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"><span aria-hidden="true">＋1</span><span className="block text-[10px] font-bold uppercase tracking-wider">Gol · {side === 1 ? 'A' : 'B'}</span></button>
-              </div>
-            ))}
-          </div>
-
-          <div className="mt-4 grid gap-2 sm:grid-cols-[1fr_auto_auto]">
-            <label className="text-xs font-medium text-slate-400">
-              Zawodnik — kartka / przewinienie
-              <select
-                aria-label="Wybierz zawodnika"
-                value={selectedPlayerId}
-                onChange={(event) => setSelectedPlayerId(event.target.value)}
-                disabled={!canScore}
-                className="mt-1.5 min-h-14 w-full rounded-xl border border-white/10 bg-[#090D16] px-3 text-sm text-white focus:border-[#0F62FE] focus:outline-none"
-              >
-                <option value="">Wybierz zawodnika</option>
-                {players.filter((player) => player?.id).map((player) => (
-                  <option key={player.id} value={player.id}>{player.name}</option>
-                ))}
-              </select>
-            </label>
-            <button type="button" disabled={!canScore || !selectedPlayerId} onClick={() => record('FOUL_CARD_ISSUED', { playerId: selectedPlayerId, cardType: 'YELLOW' })} className={`${BUTTON_CLASS} self-end !min-h-14 !px-4 text-sm`}>🟨 Żółta</button>
-            <button type="button" disabled={!canScore || !selectedPlayerId} onClick={() => record('FOUL_CARD_ISSUED', { playerId: selectedPlayerId, cardType: 'RED' })} className={`${BUTTON_CLASS} self-end !min-h-14 !px-4 text-sm`}>🟥 Czerwona</button>
-          </div>
-
-          <div className="mt-5 grid gap-3 sm:grid-cols-2">
-            <label className="text-xs font-medium text-slate-400">
-              Część meczu
-              <select aria-label="Część meczu" disabled={finished || pending.length > 0} value={match.period || '1'} onChange={(event) => record('PERIOD_CHANGED', { period: event.target.value })} className="mt-1.5 min-h-12 w-full rounded-xl border border-white/10 bg-[#090D16] px-3 text-sm text-white focus:border-[#0F62FE] focus:outline-none">
-                <option value="1">1. połowa / set</option>
-                <option value="2">2. połowa / set</option>
-                <option value="3">3. połowa / set</option>
-                <option value="OT">Dogrywka</option>
-                <option value="PEN">Rzuty karne</option>
-              </select>
-            </label>
-            <label className="text-xs font-medium text-slate-400">
-              Korekta czasu (minuty)
-              <input
-                aria-label="Korekta czasu w minutach"
-                type="number"
-                min="0"
-                max="600"
-                disabled={finished || pending.length > 0}
-                value={clockCorrection ?? Math.floor(elapsedClock(match, now) / 60)}
-                onChange={(event) => setClockCorrection(event.target.value)}
-                onBlur={() => {
-                  if (clockCorrection === null || clockCorrection === '') return;
-                  record('CLOCK_CHANGED', { action: 'SET', seconds: Math.min(36000, Math.max(0, Number(clockCorrection) || 0) * 60) });
-                  setClockCorrection(null);
-                }}
-                className="mt-1.5 min-h-12 w-full rounded-xl border border-white/10 bg-[#090D16] px-3 text-sm text-white focus:border-[#0F62FE] focus:outline-none"
-              />
-            </label>
-          </div>
-
-          <div className="mt-5 flex flex-wrap justify-between gap-3 border-t border-white/10 pt-5">
-            <div className="flex gap-2">
-              <button type="button" disabled={!match.canUndo || !online || pending.length > 0} onClick={() => controlAction('UNDO')} className="min-h-12 rounded-xl border border-white/10 px-4 text-sm font-semibold disabled:opacity-40">↶ Cofnij</button>
-              <button type="button" disabled={!match.canRedo || !online || pending.length > 0} onClick={() => controlAction('REDO')} className="min-h-12 rounded-xl border border-white/10 px-4 text-sm font-semibold disabled:opacity-40">↷ Ponów</button>
-            </div>
-            {!finished && !finishing && (
-              <button type="button" disabled={pending.length > 0} onClick={requestFinish} className="referee-finish-button min-h-12 rounded-xl border border-red-400/30 bg-red-400/10 px-5 text-sm font-bold text-red-200 disabled:opacity-40">
-                Zakończ mecz…
-              </button>
-            )}
-          </div>
-
-          {finishing && (
-            <div className="mt-4 rounded-2xl border border-red-400/30 bg-red-400/5 p-4">
-              <p className="font-semibold text-red-100">Czy na pewno zatwierdzić wynik {match.score1 ?? 0} : {match.score2 ?? 0}?</p>
-              <p className="mt-1 text-xs text-slate-400">Wynik możesz później skorygować przez cofnięcie zdarzenia w historii.</p>
-              {requiresPenaltyDecision(match)
-                && (match.score1 || 0) + (match.extraTimeScore1 || 0)
-                  === (match.score2 || 0) + (match.extraTimeScore2 || 0) && (
-                <div className="mt-4 grid grid-cols-2 gap-3">
-                  <label className="text-xs text-slate-300">Karne — strona A<input type="number" min="0" value={penalties.penaltyScore1} onChange={(event) => setPenalties((current) => ({ ...current, penaltyScore1: Number(event.target.value) }))} className="mt-1 min-h-11 w-full rounded-lg border border-white/10 bg-[#090D16] px-3 text-white" /></label>
-                  <label className="text-xs text-slate-300">Karne — strona B<input type="number" min="0" value={penalties.penaltyScore2} onChange={(event) => setPenalties((current) => ({ ...current, penaltyScore2: Number(event.target.value) }))} className="mt-1 min-h-11 w-full rounded-lg border border-white/10 bg-[#090D16] px-3 text-white" /></label>
+          <div className="p-4 sm:p-6">
+            <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-2 sm:gap-4">
+              {[1, 2].map((side) => (
+                <div key={side} className={`min-w-0 text-center ${side === 2 ? 'col-start-3' : 'col-start-1'} row-start-1`}>
+                  <p className="mono mb-1 text-[0.6875rem] font-semibold uppercase tracking-[0.14em] text-muted">Strona {side === 1 ? 'A' : 'B'}</p>
+                  <p className="flex min-h-[2.6rem] items-end justify-center break-words font-display text-lg font-bold uppercase leading-none text-ink sm:text-2xl">
+                    {match[`player${side}`]?.name || 'Oczekiwanie na awans'}
+                  </p>
+                  <div className="score-digits mt-2">
+                    <Counter value={match[`score${side}`] ?? 0} fontSize="clamp(4.75rem, 21vw, 8rem)" fontWeight={800} duration={0.45} fade={0.1} intro={false} />
+                  </div>
+                  {match[`extraTimeScore${side}`] > 0 && <p className="mono mt-1 text-xs text-muted">Dogrywka: {match[`extraTimeScore${side}`]}</p>}
                 </div>
-              )}
-              <div className="mt-4 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-                <button type="button" onClick={() => setFinishing(false)} className="min-h-12 rounded-xl border border-white/10 px-5 text-sm font-semibold text-slate-200">Wróć do meczu</button>
-                <button type="button" disabled={pending.length > 0} onClick={requestFinish} className="min-h-12 rounded-xl bg-red-500 px-5 text-sm font-bold text-white disabled:opacity-40">
-                  Potwierdź i zakończ mecz
+              ))}
+              <span className="score-digits col-start-2 row-start-1 pb-3 text-5xl text-muted" aria-hidden="true">:</span>
+            </div>
+
+            <div className="mt-5 flex flex-wrap items-center justify-center gap-2.5" data-tour="ref-clock">
+              <span className="clock rounded-[10px] border border-line bg-bg px-3.5 py-2" aria-live="off">{clock}</span>
+              <span className="chip !h-[34px]">Część {match.period || '1'}</span>
+              {match.clockRunning
+                ? (
+                  <button type="button" disabled={pending.length > 0} onClick={() => record('CLOCK_CHANGED', { action: 'PAUSE' })} className="btn btn-ghost">
+                    <Icon name="pause" size={18} /> Pauza
+                  </button>
+                )
+                : (
+                  <button
+                    type="button"
+                    disabled={finished || pending.length > 0}
+                    onClick={() => record(scheduled ? 'MATCH_STARTED' : 'CLOCK_CHANGED', { action: 'START' })}
+                    className={`btn ${scheduled ? 'btn-primary' : 'btn-solid'}`}
+                  >
+                    <Icon name="play" size={18} /> {scheduled ? 'Start meczu' : 'Wznów czas'}
+                  </button>
+                )}
+              <button type="button" disabled={finished || pending.length > 0} onClick={() => setExtraTime((current) => !current)} aria-pressed={extraTime} className="pill !min-h-[48px]">
+                Dogrywka
+              </button>
+            </div>
+            {extraTime && !finished && <p className="mt-3 text-center text-sm font-semibold text-ink">Tryb dogrywki: przyciski +1 / −1 liczą teraz punkty dogrywki.</p>}
+
+            <ClickSpark sparkColor={theme === 'dark' ? '#c8f31d' : '#14130f'} sparkSize={12} sparkRadius={34} sparkCount={10} duration={450} style={{ height: 'auto' }}>
+              <div className="mt-5 grid grid-cols-2 gap-3" data-tour="ref-score">
+                {[1, 2].map((side) => (
+                  <div key={side} className="grid grid-cols-[1fr_2fr] gap-2">
+                    <button
+                      type="button"
+                      aria-label={`Odejmij punkt stronie ${side === 1 ? 'A' : 'B'}`}
+                      disabled={!canScore || ((extraTime ? match[`extraTimeScore${side}`] : match[`score${side}`]) || 0) < 1}
+                      onClick={() => record('SCORE_CHANGED', { side, delta: -1, period: extraTime ? 'extraTime' : 'regular' })}
+                      className="ref-minus"
+                    >−1</button>
+                    <button
+                      type="button"
+                      aria-label={`Dodaj punkt stronie ${side === 1 ? 'A' : 'B'}`}
+                      disabled={!canScore}
+                      onClick={() => record('SCORE_CHANGED', { side, delta: 1, period: extraTime ? 'extraTime' : 'regular' })}
+                      className="ref-plus"
+                    >
+                      <span aria-hidden="true" className="text-[2.5rem]">+1</span>
+                      <span className="mono text-[0.6875rem] font-semibold uppercase tracking-[0.12em]">Punkt · {side === 1 ? 'A' : 'B'}</span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </ClickSpark>
+
+            <div className="mt-5 grid gap-2.5 sm:grid-cols-[1fr_auto_auto] sm:items-end" data-tour="ref-cards">
+              <div>
+                <label className="label" htmlFor="referee-player">Kartka dla zawodnika</label>
+                <select
+                  id="referee-player"
+                  value={selectedPlayerId}
+                  onChange={(event) => setSelectedPlayerId(event.target.value)}
+                  disabled={!canScore}
+                  className="input !min-h-[52px]"
+                >
+                  <option value="">Wybierz zawodnika</option>
+                  {players.filter((player) => player?.id).map((player) => (
+                    <option key={player.id} value={player.id}>{player.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-2.5 sm:contents">
+                <button type="button" disabled={!canScore || !selectedPlayerId} onClick={() => record('FOUL_CARD_ISSUED', { playerId: selectedPlayerId, cardType: 'YELLOW' })} className="btn btn-ghost !min-h-[52px]">
+                  <span className="h-5 w-3.5 rounded-[3px] border border-black/30 bg-[#f5c518]" aria-hidden="true" /> Żółta
+                </button>
+                <button type="button" disabled={!canScore || !selectedPlayerId} onClick={() => record('FOUL_CARD_ISSUED', { playerId: selectedPlayerId, cardType: 'RED' })} className="btn btn-ghost !min-h-[52px]">
+                  <span className="h-5 w-3.5 rounded-[3px] border border-black/30 bg-[#e03a1e]" aria-hidden="true" /> Czerwona
                 </button>
               </div>
             </div>
-          )}
+
+            <details className="group mt-5 rounded-[12px] border border-line">
+              <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 px-4 text-sm font-semibold text-ink [&::-webkit-details-marker]:hidden">
+                <span className="flex items-center gap-2"><Icon name="sliders" size={17} /> Część meczu i korekta czasu</span>
+                <Icon name="chevron-down" size={17} className="text-muted transition-transform duration-300 group-open:rotate-180" />
+              </summary>
+              <div className="grid gap-3 border-t border-line p-4 sm:grid-cols-2">
+                <div>
+                  <label className="label" htmlFor="referee-period">Część meczu</label>
+                  <select id="referee-period" disabled={finished || pending.length > 0} value={match.period || '1'} onChange={(event) => record('PERIOD_CHANGED', { period: event.target.value })} className="input">
+                    <option value="1">1. połowa / set</option>
+                    <option value="2">2. połowa / set</option>
+                    <option value="3">3. połowa / set</option>
+                    <option value="OT">Dogrywka</option>
+                    <option value="PEN">Rzuty karne</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="label" htmlFor="referee-clock">Korekta czasu (minuty)</label>
+                  <input
+                    id="referee-clock"
+                    type="number"
+                    min="0"
+                    max="600"
+                    disabled={finished || pending.length > 0}
+                    value={clockCorrection ?? Math.floor(elapsedClock(match, now) / 60)}
+                    onChange={(event) => setClockCorrection(event.target.value)}
+                    onBlur={() => {
+                      if (clockCorrection === null || clockCorrection === '') return;
+                      record('CLOCK_CHANGED', { action: 'SET', seconds: Math.min(36000, Math.max(0, Number(clockCorrection) || 0) * 60) });
+                      setClockCorrection(null);
+                    }}
+                    className="input"
+                  />
+                </div>
+              </div>
+            </details>
+
+            <div className="mt-5 flex flex-wrap justify-between gap-3 border-t border-line pt-5">
+              <div className="flex gap-2" data-tour="ref-undo">
+                <button type="button" disabled={!match.canUndo || !online || pending.length > 0} onClick={() => controlAction('UNDO')} className="btn btn-ghost"><Icon name="undo" size={18} /> Cofnij</button>
+                <button type="button" disabled={!match.canRedo || !online || pending.length > 0} onClick={() => controlAction('REDO')} className="btn btn-ghost"><Icon name="redo" size={18} /> Ponów</button>
+              </div>
+              {!finished && !finishing && (
+                <button type="button" disabled={pending.length > 0} onClick={requestFinish} className="btn btn-danger" data-tour="ref-finish">
+                  <Icon name="flag" size={18} /> Zakończ mecz…
+                </button>
+              )}
+            </div>
+
+            {finishing && (
+              <div className="ref-confirm mt-4 rounded-[14px] border-[1.5px] border-danger/60 bg-danger/[0.06] p-4 sm:p-5">
+                <p className="h-card">Zatwierdzić wynik {match.score1 ?? 0} : {match.score2 ?? 0}?</p>
+                <p className="mt-2 text-sm text-muted">Wynik możesz później skorygować przez cofnięcie zdarzenia w historii.</p>
+                {requiresPenaltyDecision(match)
+                  && (match.score1 || 0) + (match.extraTimeScore1 || 0)
+                    === (match.score2 || 0) + (match.extraTimeScore2 || 0) && (
+                  <div className="mt-4">
+                    <p className="mb-3 text-sm font-semibold text-ink">Remis w meczu pucharowym — wpisz wynik rzutów karnych.</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <label className="label !mb-0">Karne — strona A<input type="number" min="0" value={penalties.penaltyScore1} onChange={(event) => setPenalties((current) => ({ ...current, penaltyScore1: Number(event.target.value) }))} className="input mt-1.5" /></label>
+                      <label className="label !mb-0">Karne — strona B<input type="number" min="0" value={penalties.penaltyScore2} onChange={(event) => setPenalties((current) => ({ ...current, penaltyScore2: Number(event.target.value) }))} className="input mt-1.5" /></label>
+                    </div>
+                  </div>
+                )}
+                <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                  <button type="button" onClick={() => setFinishing(false)} className="btn btn-ghost">Wróć do meczu</button>
+                  <button type="button" disabled={pending.length > 0} onClick={requestFinish} className="btn btn-danger-solid">
+                    <Icon name="check" size={18} /> Potwierdź i zakończ mecz
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </section>
 
         {match.eventHistory?.length > 0 && (
-          <section className="mt-5 rounded-2xl border border-white/10 bg-[#121826] p-4">
-            <h2 className="mb-3 text-sm font-semibold text-slate-200">Historia zdarzeń</h2>
-            <ol className="space-y-2">
+          <section className="card mt-5 p-4 sm:p-5">
+            <h2 className="h-card mb-3">Historia zdarzeń</h2>
+            <ol className="grid">
               {match.eventHistory.slice(-8).reverse().map((event) => (
-                <li key={event.id} className="flex items-center justify-between gap-3 border-b border-white/5 pb-2 text-xs">
-                  <span className="text-slate-300">{({
+                <li key={event.id} className="flex items-center justify-between gap-3 border-b border-line py-2.5 text-sm last:border-b-0">
+                  <span className="text-ink">{({
                     MATCH_STARTED: 'Mecz rozpoczęty',
                     SCORE_CHANGED: `Zmiana wyniku · ${event.payload.commandData?.side === 1 ? 'strona A' : 'strona B'}`,
                     SCORE_SET: 'Korekta wyniku',
@@ -458,14 +554,14 @@ export default function RefereePanel() {
                     ACTION_UNDONE: 'Cofnięto zdarzenie',
                     ACTION_REDONE: 'Ponowiono zdarzenie',
                   }[event.type] || event.type)}</span>
-                  <span className="shrink-0 font-mono text-slate-500">v{event.sequence}</span>
+                  <span className="mono shrink-0 text-xs text-muted">v{event.sequence}</span>
                 </li>
               ))}
             </ol>
           </section>
         )}
 
-        <p className="mt-4 text-center text-xs text-slate-500">
+        <p className="mono mt-4 text-center text-xs text-muted">
           Zmiany zapisywane są jako historia zdarzeń. {match.revision ? `Wersja meczu: ${match.revision}.` : ''}
         </p>
       </div>

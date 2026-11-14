@@ -1,6 +1,15 @@
 import { useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import AuthLayout from '../components/AuthLayout';
+import Icon from '../components/Icon';
+import { Arrow, Notice } from '../components/ui';
+
+const ROLES = [
+  { value: 'PLAYER', icon: 'user', label: 'Zawodnik', description: 'Zapisuję się na turnieje i śledzę swoje mecze.', next: 'Po rejestracji pokażemy Ci listę wydarzeń.' },
+  { value: 'ORGANIZER', icon: 'bracket', label: 'Organizator', description: 'Tworzę wydarzenia, harmonogram i przydzielam sędziów.', next: 'Po rejestracji otworzymy kreator wydarzenia.' },
+  { value: 'REFEREE', icon: 'whistle', label: 'Sędzia', description: 'Prowadzę wynik meczu na żywo z telefonu.', next: 'Po rejestracji podaj organizatorowi swoją nazwę użytkownika.' },
+];
 
 export default function Register() {
   const { register } = useAuth();
@@ -36,7 +45,7 @@ export default function Register() {
     setLoading(true);
     try {
       await register(form.name, form.username, form.email, form.password, form.role);
-      navigate(autoJoinTournamentId ? returnTo : form.role === 'ORGANIZER' ? '/tournaments/create' : '/tournaments', {
+      navigate(autoJoinTournamentId ? returnTo : form.role === 'ORGANIZER' ? '/tournaments/create' : form.role === 'REFEREE' ? '/referee' : '/tournaments', {
         replace: true,
         state: autoJoinTournamentId ? { autoJoinTournamentId } : undefined,
       });
@@ -47,105 +56,101 @@ export default function Register() {
     }
   }
 
+  const activeRole = ROLES.find((role) => role.value === form.role);
+  const passwordOk = form.password.length >= 6;
+
   return (
-    <div className="auth-page min-h-[calc(100vh-4rem)] bg-slate-950 flex items-center justify-center px-4">
-      <div className="w-full max-w-md">
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8">
-          <h1 className="text-2xl font-bold text-white mb-1">Utwórz konto</h1>
-          <p className="text-slate-400 text-sm mb-6">
-            Masz już konto?{' '}
-            <Link to="/login" state={location.state} className="text-indigo-400 hover:text-indigo-300">
-              Zaloguj się
-            </Link>
-          </p>
+    <AuthLayout
+      eyebrow="Rejestracja"
+      title="Dołącz do gry"
+      lead={(
+        <>
+          Masz już konto?{' '}
+          <Link to="/login" state={location.state} className="link">Zaloguj się</Link>
+        </>
+      )}
+      posterTitle={<>Jedno konto.<br />Cały turniej.</>}
+      posterPoints={['Rejestracja zajmuje mniej niż minutę', 'Rolę wybierasz jednym kliknięciem', 'Od razu prowadzimy Cię do następnego kroku']}
+    >
+      {error && <Notice tone="danger" className="mb-5">{error}</Notice>}
 
-          {error && (
-            <div className="bg-red-900/40 border border-red-700 text-red-300 text-sm rounded-lg px-4 py-3 mb-4">
-              {error}
+      <form onSubmit={handleSubmit} className="grid gap-5">
+        {autoJoinTournamentId ? (
+          <Notice className="auth-rise">Zakładasz konto zawodnika — zaraz po rejestracji zapiszemy Cię na wybrane wydarzenie.</Notice>
+        ) : (
+          <fieldset className="auth-rise">
+            <legend className="label">1. Kim jesteś?</legend>
+            <div className="grid gap-2.5">
+              {ROLES.map((role) => (
+                <label key={role.value} className="choice">
+                  <input className="sr-only" type="radio" name="role" value={role.value} checked={form.role === role.value} onChange={handleChange} />
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[10px] border border-line-2 bg-bg text-ink"><Icon name={role.icon} size={20} /></span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block font-display text-xl font-bold uppercase leading-none tracking-[0.02em] text-ink">{role.label}</span>
+                    <span className="mt-1 block text-[0.8125rem] leading-snug text-muted">{role.description}</span>
+                  </span>
+                  <span className="choice-mark"><Icon name="check" size={14} strokeWidth={3} /></span>
+                </label>
+              ))}
             </div>
-          )}
+            <p className="hint" aria-live="polite">{activeRole?.next}</p>
+          </fieldset>
+        )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-1">Imię i nazwisko</label>
-              <input
-                type="text"
-                name="name"
-                value={form.name}
-                onChange={handleChange}
-                required
-                className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                placeholder="Jan Kowalski"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-1">Nazwa użytkownika</label>
-              <input
-                type="text"
-                name="username"
-                value={form.username}
-                onChange={handleChange}
-                required
-                minLength={3}
-                maxLength={24}
-                pattern="[A-Za-z0-9_]{3,24}"
-                autoComplete="username"
-                className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                placeholder="np. jan_kowalski"
-              />
-              <p className="mt-1 text-xs text-slate-500">3–24 znaki: litery, cyfry i podkreślenia. Organizatorzy użyją tej nazwy do przydzielenia Ci meczu.</p>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-1">Email</label>
-              <input
-                type="email"
-                name="email"
-                value={form.email}
-                onChange={handleChange}
-                required
-                className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                placeholder="jan@example.com"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-1">Hasło</label>
-              <input
-                type="password"
-                name="password"
-                value={form.password}
-                onChange={handleChange}
-                required
-                className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                placeholder="min. 6 znaków"
-              />
-            </div>
-            {autoJoinTournamentId ? (
-              <p className="text-sm text-slate-400">Tworzone konto będzie kontem zawodnika, aby zapisać Cię na wydarzenie.</p>
-            ) : (
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1">Rola</label>
-                <select
-                  name="role"
-                  value={form.role}
-                  onChange={handleChange}
-                  className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                >
-                  <option value="PLAYER">Zawodnik</option>
-                  <option value="ORGANIZER">Organizator</option>
-                  <option value="REFEREE">Sędzia</option>
-                </select>
-              </div>
-            )}
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-semibold py-2.5 rounded-lg transition-colors"
-            >
-              {loading ? 'Rejestracja...' : 'Zarejestruj się'}
-            </button>
-          </form>
-        </div>
-      </div>
-    </div>
+        <fieldset className="grid gap-5">
+          <legend className="label auth-rise">{autoJoinTournamentId ? 'Twoje dane' : '2. Twoje dane'}</legend>
+          <div className="auth-rise">
+            <label className="label" htmlFor="register-name">Imię i nazwisko</label>
+            <input id="register-name" type="text" name="name" value={form.name} onChange={handleChange} required autoComplete="name" className="input" placeholder="Jan Kowalski" />
+          </div>
+          <div className="auth-rise">
+            <label className="label" htmlFor="register-username">Nazwa użytkownika</label>
+            <input
+              id="register-username"
+              type="text"
+              name="username"
+              value={form.username}
+              onChange={handleChange}
+              required
+              minLength={3}
+              maxLength={24}
+              pattern="[A-Za-z0-9_]{3,24}"
+              autoComplete="username"
+              aria-describedby="register-username-hint"
+              className="input"
+              placeholder="np. jan_kowalski"
+            />
+            <p id="register-username-hint" className="hint">3–24 znaki: litery, cyfry i podkreślenia. Organizatorzy użyją tej nazwy do przydzielenia Ci meczu.</p>
+          </div>
+          <div className="auth-rise">
+            <label className="label" htmlFor="register-email">Adres e-mail</label>
+            <input id="register-email" type="email" name="email" value={form.email} onChange={handleChange} required autoComplete="email" className="input" placeholder="jan@example.com" />
+          </div>
+          <div className="auth-rise">
+            <label className="label" htmlFor="register-password">Hasło</label>
+            <input
+              id="register-password"
+              type="password"
+              name="password"
+              value={form.password}
+              onChange={handleChange}
+              required
+              autoComplete="new-password"
+              aria-describedby="register-password-hint"
+              className="input"
+              placeholder="min. 6 znaków"
+            />
+            <p id="register-password-hint" className={`hint flex items-center gap-1.5 ${passwordOk ? '!text-ok' : ''}`}>
+              <Icon name={passwordOk ? 'check' : 'info'} size={14} />
+              {passwordOk ? 'Hasło ma odpowiednią długość.' : 'Co najmniej 6 znaków.'}
+            </p>
+          </div>
+        </fieldset>
+
+        <button type="submit" disabled={loading} className="btn btn-primary btn-lg btn-block auth-rise">
+          {loading ? 'Rejestracja…' : 'Załóż konto'} {!loading && <Arrow />}
+        </button>
+      </form>
+    </AuthLayout>
   );
 }

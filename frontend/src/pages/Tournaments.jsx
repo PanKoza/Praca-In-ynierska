@@ -1,38 +1,24 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import api from '../api/axios';
+import { useAuth } from '../context/AuthContext';
+import { SPORTS, SPORT_LABELS, TOURNAMENT_STATUS_LABELS, plural, sportIcon } from '../lib/labels';
+import EventCard from '../components/EventCard';
+import Icon from '../components/Icon';
+import Reveal from '../components/Reveal';
+import { useTour } from '../components/Tour';
+import { Arrow, EmptyState, Notice, PageHeader } from '../components/ui';
 
-const SPORT_LABELS = {
-  BEACH_VOLLEYBALL: '🏐 Siatkówka plażowa',
-  FOOTBALL_6V6: '⚽ Piłka nożna 6v6',
-  SOCCER: '⚽ Piłka nożna',
-  BASKETBALL: '🏀 Koszykówka',
-  VOLLEYBALL: '🏐 Siatkówka',
-  TENNIS: '🎾 Tenis',
-  ESPORTS: '🎮 E-sport',
-  CUSTOM: '🏅 Inna dyscyplina',
-  OTHER: '🏅 Inne',
-};
+const FILTER_SPORTS = SPORTS.filter(({ value }) => value !== 'OTHER');
 
-const STATUS_STYLES = {
-  DRAFT: 'bg-[rgba(255,255,255,0.06)] text-[var(--app-text-muted)]',
-  OPEN: 'bg-[rgba(57,180,254,0.12)] text-[var(--tourni-light-blue)]',
-  PUBLISHED: 'bg-[rgba(57,180,254,0.12)] text-[var(--tourni-light-blue)]',
-  IN_PROGRESS: 'bg-[rgba(15,98,254,0.12)] text-[var(--tourni-blue)]',
-  FINISHED: 'bg-[rgba(138,63,252,0.12)] text-[var(--tourni-violet)]',
-  CANCELLED: 'bg-[rgba(239,68,68,0.12)] text-[#f87171]',
-};
-
-const STATUS_LABELS = {
-  DRAFT: 'Szkic',
-  OPEN: 'Otwarte',
-  PUBLISHED: 'Opublikowany',
-  IN_PROGRESS: 'W toku',
-  FINISHED: 'Zakończone',
-  CANCELLED: 'Anulowane',
-};
+const TOUR = [
+  { target: '[data-tour="list-search"]', title: 'Szukaj po swojemu', body: 'Wpisz nazwę wydarzenia, miasto albo organizatora — lista zawęża się podczas pisania.' },
+  { target: '[data-tour="list-sports"]', title: 'Wybierz dyscyplinę', body: 'Jedno kliknięcie pokazuje tylko wybrany sport. Kliknij ponownie „Wszystkie”, aby wrócić.' },
+  { target: '[data-tour="list-results"]', title: 'Otwórz kartę wydarzenia', body: 'Na karcie widzisz termin, miejsce i wolne miejsca. Kliknij, aby zobaczyć szczegóły i się zapisać.' },
+];
 
 export default function Tournaments() {
+  const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [tournaments, setTournaments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -42,6 +28,9 @@ export default function Tournaments() {
     status: searchParams.get('status') || '',
     search: searchParams.get('search') || '',
   };
+  const canCreate = user?.role === 'ORGANIZER' || user?.role === 'ADMIN';
+
+  useTour('tournaments', TOUR);
 
   useEffect(() => {
     let active = true;
@@ -57,18 +46,25 @@ export default function Tournaments() {
     return () => { active = false; };
   }, [filters.sportType, filters.status]);
 
-  function handleFilter(e) {
-    const nextValue = e.target.value;
+  function setFilter(name, nextValue) {
     const params = new URLSearchParams();
-    const nextFilters = { ...filters, [e.target.name]: nextValue };
+    const nextFilters = { ...filters, [name]: nextValue };
     if (nextFilters.sportType) params.set('sportType', nextFilters.sportType);
     if (nextFilters.status) params.set('status', nextFilters.status);
     if (nextFilters.search) params.set('search', nextFilters.search);
-    if (e.target.name !== 'search') {
+    if (name !== 'search' && nextValue !== filters[name]) {
       setLoading(true);
       setError('');
     }
-    setSearchParams(params, { replace: e.target.name === 'search' });
+    setSearchParams(params, { replace: name === 'search' });
+  }
+
+  function clearFilters() {
+    if (filters.sportType || filters.status) {
+      setLoading(true);
+      setError('');
+    }
+    setSearchParams(new URLSearchParams(), { replace: true });
   }
 
   const normalizedSearch = filters.search.trim().toLocaleLowerCase('pl');
@@ -80,93 +76,94 @@ export default function Tournaments() {
       SPORT_LABELS[tournament.sportType],
     ].filter(Boolean).join(' ').toLocaleLowerCase('pl').includes(normalizedSearch)
   ));
+  const hasFilters = Boolean(filters.sportType || filters.status || filters.search);
 
   return (
-    <main className="discovery-page min-h-[calc(100vh-4rem)] bg-[var(--app-bg)] px-4 py-10 text-[var(--app-text)]">
-      <div className="mx-auto max-w-6xl">
-        <div className="mb-8 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-          <div>
-            <p className="section-eyebrow">Znajdź swój następny mecz</p>
-            <h1 className="mt-3 text-4xl font-bold tracking-[-0.05em] text-[var(--app-text-strong)] sm:text-5xl">Wydarzenia</h1>
-            <p className="mt-3 max-w-xl text-sm leading-6 text-[var(--app-text-muted)]">Przeglądaj turnieje, sprawdź wolne miejsca i wybierz to, co Cię interesuje.</p>
+    <main className="page">
+      <div className="shell">
+        <PageHeader eyebrow="Znajdź swój następny mecz" title="Wydarzenia">
+          Przeglądaj turnieje, sprawdź wolne miejsca i wybierz to, co Cię interesuje.
+        </PageHeader>
+
+        <Reveal className="mb-8 grid gap-4">
+          <div className="grid gap-3 md:grid-cols-[1fr_240px]">
+            <label
+              className="flex items-center gap-3 rounded-[12px] border-[1.5px] border-line-2 bg-raised px-4 transition focus-within:border-ink focus-within:shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent)_60%,transparent)]"
+              data-tour="list-search"
+            >
+              <Icon name="search" size={20} className="shrink-0 text-muted" />
+              <span className="sr-only">Szukaj wydarzenia, sportu lub miasta</span>
+              <input
+                name="search"
+                type="search"
+                value={filters.search}
+                onChange={(event) => setFilter('search', event.target.value)}
+                placeholder="Szukaj wydarzenia, sportu lub miasta"
+                className="min-h-[52px] min-w-0 flex-1 bg-transparent text-base text-ink outline-none placeholder:text-muted"
+              />
+            </label>
+            <div>
+              <label className="sr-only" htmlFor="discovery-status">Filtruj po statusie</label>
+              <select id="discovery-status" name="status" value={filters.status} onChange={(event) => setFilter('status', event.target.value)} className="input !min-h-[55px]">
+                <option value="">Wszystkie statusy</option>
+                {Object.entries(TOURNAMENT_STATUS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </div>
           </div>
 
-        </div>
-
-        <div className="discovery-tools mb-8">
-          <label className="discovery-search">
-            <span aria-hidden="true">⌕</span>
-            <span className="sr-only">Szukaj wydarzenia, sportu lub miasta</span>
-            <input name="search" value={filters.search} onChange={handleFilter} placeholder="Szukaj wydarzenia, sportu lub miasta" />
-          </label>
-          <div className="flex flex-wrap gap-3">
-            <label className="sr-only" htmlFor="discovery-sport">Filtruj po dyscyplinie</label>
-            <select id="discovery-sport" name="sportType" value={filters.sportType} onChange={handleFilter} className="discovery-select">
-              <option value="">Wszystkie sporty</option>
-              {Object.entries(SPORT_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-            </select>
-            <label className="sr-only" htmlFor="discovery-status">Filtruj po statusie</label>
-            <select id="discovery-status" name="status" value={filters.status} onChange={handleFilter} className="discovery-select">
-              <option value="">Wszystkie statusy</option>
-              {Object.entries(STATUS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-            </select>
+          <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:flex-wrap sm:px-0" role="group" aria-label="Filtruj po dyscyplinie" data-tour="list-sports">
+            <button type="button" className="pill" aria-pressed={!filters.sportType} onClick={() => setFilter('sportType', '')}>Wszystkie sporty</button>
+            {FILTER_SPORTS.map(({ value, label }) => (
+              <button key={value} type="button" className="pill" aria-pressed={filters.sportType === value} onClick={() => setFilter('sportType', filters.sportType === value ? '' : value)}>
+                <Icon name={sportIcon(value)} size={17} />
+                {label}
+              </button>
+            ))}
           </div>
-        </div>
+        </Reveal>
+
+        {!loading && !error && (
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-3" aria-live="polite">
+            <p className="mono text-xs font-semibold uppercase tracking-[0.12em] text-muted">
+              {visibleTournaments.length} {plural(visibleTournaments.length, 'wydarzenie', 'wydarzenia', 'wydarzeń')}
+            </p>
+            {hasFilters && (
+              <button type="button" onClick={clearFilters} className="btn btn-quiet btn-sm">
+                <Icon name="x" size={16} /> Wyczyść filtry
+              </button>
+            )}
+          </div>
+        )}
 
         {loading && (
-          <div className="flex justify-center py-20" role="status" aria-label="Ładowanie wydarzeń">
-            <div className="h-8 w-8 animate-spin rounded-full border-4 border-[var(--tourni-blue)] border-t-transparent" />
+          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3" role="status" aria-label="Ładowanie wydarzeń">
+            {[0, 1, 2, 3, 4, 5].map((item) => <div key={item} className="skeleton h-[290px]" />)}
           </div>
         )}
 
-        {error && <p className="py-10 text-center text-red-400" role="alert">{error}</p>}
+        {error && <Notice tone="danger">{error}</Notice>}
 
         {!loading && !error && visibleTournaments.length === 0 && (
-          <div className="discovery-empty">
-            <span className="discovery-empty-icon" aria-hidden="true">⌕</span>
-            <h2 className="text-lg font-semibold text-[var(--app-text-strong)]">{tournaments.length ? 'Nie znaleźliśmy pasujących wydarzeń' : 'Brak wydarzeń do wyświetlenia'}</h2>
-            <p className="mt-2 text-sm text-[var(--app-text-muted)]">{tournaments.length ? 'Zmień wyszukiwaną frazę lub usuń część filtrów.' : 'Wróć później albo zacznij organizować własne wydarzenie.'}</p>
-            {tournaments.length === 0 && <Link to="/tournaments/create" className="primary-action mt-5">Zorganizuj wydarzenie <span aria-hidden="true">→</span></Link>}
-          </div>
+          <EmptyState
+            icon="search"
+            title={tournaments.length || hasFilters ? 'Nic nie pasuje do tych filtrów' : 'Brak wydarzeń do wyświetlenia'}
+            action={tournaments.length || hasFilters
+              ? <button type="button" onClick={clearFilters} className="btn btn-solid">Pokaż wszystkie wydarzenia</button>
+              : (canCreate || !user) && <Link to={canCreate ? '/tournaments/create' : '/register?role=ORGANIZER'} className="btn btn-primary">Zorganizuj wydarzenie <Arrow /></Link>}
+          >
+            {tournaments.length || hasFilters
+              ? 'Zmień wyszukiwaną frazę albo usuń część filtrów.'
+              : 'Wróć później albo zacznij organizować własne wydarzenie.'}
+          </EmptyState>
         )}
 
-        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {!loading && !error && visibleTournaments.map((t) => (
-            <Link
-              key={t.id}
-              to={`/tournaments/${t.id}`}
-              className="discovery-event-card group rounded-3xl border border-[var(--app-border)] bg-[var(--app-surface)] p-6 transition-all hover:border-[rgba(15,98,254,0.5)] hover:bg-[var(--app-surface-strong)]"
-            >
-              <div className="mb-3 flex items-start justify-between gap-3">
-                <span className="text-sm text-[var(--app-text-muted)]">{SPORT_LABELS[t.sportType]}</span>
-                <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[t.status]}`}>
-                  {STATUS_LABELS[t.status]}
-                </span>
-              </div>
-              <h2 className="mb-1 text-lg font-semibold text-[var(--app-text-strong)] transition-colors group-hover:text-[var(--tourni-blue)]">
-                {t.title}
-              </h2>
-              <p className="mb-4 text-sm text-[var(--app-text-muted)]">
-                📅{' '}
-                {new Date(t.date).toLocaleDateString('pl-PL', {
-                  day: 'numeric',
-                  month: 'long',
-                  year: 'numeric',
-                })}
-              </p>
-              <div className="flex items-center justify-between text-sm text-[var(--app-text-muted)]">
-                <span>{t.organizer?.name || 'Organizator'}</span>
-                <span>
-                  {t._count.participants}/{t.maxParticipants} uczestników
-                </span>
-              </div>
-              <div className="home-progress-track mt-3" aria-label={`${t._count.participants} z ${t.maxParticipants} miejsc zajętych`}>
-                <span style={{ width: `${t.maxParticipants ? Math.min(100, Math.round((t._count.participants / t.maxParticipants) * 100)) : 0}%` }} />
-              </div>
-              <span className="home-accent-text mt-5 inline-flex text-sm font-semibold">Sprawdź szczegóły <span className="ml-2" aria-hidden="true">→</span></span>
-            </Link>
-          ))}
-        </div>
+        {!loading && !error && visibleTournaments.length > 0 && (
+          <Reveal key={`${filters.sportType}-${filters.status}`} stagger={0.06} className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3" data-tour="list-results">
+            {visibleTournaments.map((tournament) => (
+              <div key={tournament.id}><EventCard tournament={tournament} cta="Sprawdź szczegóły" /></div>
+            ))}
+          </Reveal>
+        )}
       </div>
     </main>
   );

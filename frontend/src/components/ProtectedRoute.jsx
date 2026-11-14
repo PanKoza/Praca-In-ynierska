@@ -1,5 +1,6 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { FullPageLoader } from './ui';
 
 /**
  * Protects a route.
@@ -10,11 +11,7 @@ export default function ProtectedRoute({ children, roles = [] }) {
   const location = useLocation();
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
-        <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
+    return <FullPageLoader label="Sprawdzam sesję…" />;
   }
 
   if (!user) {
